@@ -4,48 +4,51 @@ import sys
 import requests
 import subprocess
 import argparse
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QProgressBar, QLabel
+import logging
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QProgressBar, QLabel, QMessageBox, QDesktopWidget
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 CONFIG_FILE = 'config.json'
 GITHUB_REPO = 'ejatapibeda/AplikasiPembukuan'
+LOG_FILE = 'update_log.txt'
+
+# Set up logging
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 class UpdaterThread(QThread):
     progress_signal = pyqtSignal(int)
     status_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal(bool)
+    finished_signal = pyqtSignal(bool, str)  # Pass the filename
 
     def run(self):
         try:
+            logging.info("Memulai proses update.")
             self.status_signal.emit("Memeriksa versi terbaru...")
             latest_version = get_latest_version()
-            self.progress_signal.emit(10)
+            self.progress_signal.emit(20)
 
-            self.status_signal.emit("Mengunduh update...")
+            self.status_signal.emit("Mengunduh update... Mohon Tunggu")
+            logging.info(f"Versi terbaru yang ditemukan: {latest_version}")
             new_exe = download_update(latest_version)
             if not new_exe:
                 raise Exception("Gagal mengunduh update")
-            self.progress_signal.emit(50)
+            self.progress_signal.emit(60)
 
             self.status_signal.emit("Memperbarui konfigurasi...")
             update_config(latest_version)
-            self.progress_signal.emit(60)
-
-            self.status_signal.emit("Mengganti file aplikasi...")
-            old_executable = sys.executable
-            new_executable_name = os.path.basename(old_executable)
-            os.remove(old_executable)
-            os.rename(new_exe, new_executable_name)
-            self.progress_signal.emit(90)
-
-            self.status_signal.emit("Memulai ulang aplikasi...")
-            subprocess.Popen([new_executable_name])
             self.progress_signal.emit(100)
-            
-            self.finished_signal.emit(True)
+
+            self.status_signal.emit("Update selesai")
+            logging.info("Update berhasil.")
+            self.finished_signal.emit(True, new_exe)  # Pass the filename
         except Exception as e:
+            logging.error(f"Error saat update: {str(e)}")
             self.status_signal.emit(f"Error: {str(e)}")
-            self.finished_signal.emit(False)
+            self.finished_signal.emit(False, "")
 
 class UpdaterGUI(QWidget):
     def __init__(self):
@@ -56,35 +59,45 @@ class UpdaterGUI(QWidget):
         layout = QVBoxLayout()
 
         self.status_label = QLabel("Memulai proses update...")
+        self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
 
         self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
         layout.addWidget(self.progress_bar)
 
         self.setLayout(layout)
         self.setWindowTitle('Update Installer')
-        self.setGeometry(300, 300, 400, 150)
+        self.resize(400, 150)
+        self.center()  # Center the window
         self.setStyleSheet("""
-            QWidget {
-                background-color: #f0f0f0;
-                font-family: Arial, sans-serif;
-            }
-            QLabel {
-                font-size: 14px;
-                color: #333;
-            }
-            QProgressBar {
-                border: 2px solid #bcbcbc;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                width: 10px;
-                margin: 0.5px;
-            }
+        QWidget {
+            background-color: #f5f5f5;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+        QLabel {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        QProgressBar {
+            border: none;
+            background-color: #e0e0e0;
+            height: 8px;
+            border-radius: 4px;
+        }
+        QProgressBar::chunk {
+            background-color: #4CAF50;
+            border-radius: 4px;
+        }
         """)
+
+    def center(self):
+        qr = self.frameGeometry()
+        cp = QDesktopWidget().availableGeometry().center()
+        qr.moveCenter(cp)
+        self.move(qr.topLeft())
+
 
     def start_update(self):
         self.thread = UpdaterThread()
@@ -99,16 +112,24 @@ class UpdaterGUI(QWidget):
     def update_status(self, status):
         self.status_label.setText(status)
 
-    def update_finished(self, success):
+    def update_finished(self, success, filename):
         if success:
-            self.status_label.setText("Update selesai. Aplikasi akan dimulai ulang.")
+            reply = QMessageBox.question(self, 'Update Berhasil',
+                                     "Update selesai. Apakah Anda ingin membuka aplikasi sekarang?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if reply == QMessageBox.Yes:
+                subprocess.Popen([filename])  # Open the downloaded file
+            QApplication.instance().quit()
         else:
-            self.status_label.setText("Update gagal. Silakan coba lagi nanti.")
-        QApplication.instance().quit()
+            logging.error("Update gagal.")
+            QMessageBox.critical(self, 'Update Gagal', "Update gagal. Silakan coba lagi nanti.")
+            QApplication.instance().quit()
+
 
 def get_current_version():
     with open(CONFIG_FILE, 'r') as f:
         config = json.load(f)
+    logging.info(f"Versi saat ini: {config['version']}")
     return config['version']
 
 def get_latest_version():
@@ -130,8 +151,10 @@ def download_update(version):
             response = requests.get(download_url)
             with open(asset['name'], 'wb') as f:
                 f.write(response.content)
+            logging.info(f"File update {asset['name']} berhasil diunduh.")
             return asset['name']
     
+    logging.warning("Tidak ada file update yang ditemukan.")
     return None
 
 def update_config(new_version):
@@ -142,6 +165,8 @@ def update_config(new_version):
     
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=4)
+    
+    logging.info(f"Konfigurasi diperbarui ke versi {new_version}.")
 
 def main():
     parser = argparse.ArgumentParser(description="Update checker and installer")
@@ -163,8 +188,10 @@ def check_for_updates():
     
     if current_version != latest_version:
         print(f"Update tersedia: {latest_version}")
+        logging.info(f"Update tersedia: {latest_version}")
     else:
         print("Tidak ada update tersedia")
+        logging.info("Tidak ada update tersedia")
 
 if __name__ == "__main__":
     main()
