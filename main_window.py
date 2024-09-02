@@ -1,10 +1,13 @@
-from PyQt5.QtWidgets import QMainWindow, QHBoxLayout, QWidget, QVBoxLayout, QLabel, QStackedWidget, QLineEdit, QPushButton
+from PyQt5.QtWidgets import QMainWindow, QHBoxLayout, QWidget, QVBoxLayout, QLabel, QStackedWidget, QLineEdit, QMessageBox
 from PyQt5.QtGui import QIcon, QFont
 from PyQt5.QtCore import Qt, QSize
 from dialogs import BackupDialog
 from table_views import ConsumerTable, SalesTable, TukangTable, MaterialTable
 from modern_button import ModernButton
 from error_handling import setup_error_handling
+import os
+import subprocess
+import sys
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -61,6 +64,10 @@ class MainWindow(QMainWindow):
         self.add_sidebar_button("Daftar Pemakaian Bahan", 3, "box")
 
         self.sidebar_layout.addStretch()
+        
+        self.update_button = ModernButton("Check for Updates", "refresh")
+        self.update_button.clicked.connect(self.check_for_updates)
+        self.sidebar_layout.addWidget(self.update_button)
 
         self.backup_button = ModernButton("Backup ke Google Drive", "cloud-upload")
         self.backup_button.clicked.connect(self.open_backup_dialog)
@@ -175,3 +182,35 @@ class MainWindow(QMainWindow):
     def open_backup_dialog(self):
         dialog = BackupDialog(self)
         dialog.exec_()
+    
+    def check_for_updates(self):
+        update_exe = 'update.exe'
+        if os.path.exists(update_exe):
+            try:
+                # Jalankan update.exe dan tangkap outputnya
+                result = subprocess.run([update_exe], capture_output=True, text=True, timeout=30)
+                
+                if "Update tersedia" in result.stdout:
+                    version = result.stdout.split(":")[-1].strip()
+                    reply = QMessageBox.question(self, 'Update Tersedia', 
+                                                 f"Update versi {version} tersedia. Apakah Anda ingin menginstal?",
+                                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                    if reply == QMessageBox.Yes:
+                        self.install_update()
+                else:
+                    QMessageBox.information(self, "Update", "Tidak ada update tersedia.")
+            except subprocess.TimeoutExpired:
+                QMessageBox.warning(self, "Update", "Timeout saat memeriksa update.")
+            except Exception as e:
+                QMessageBox.warning(self, "Update", f"Error saat memeriksa update: {str(e)}")
+        else:
+            QMessageBox.warning(self, "Update", "File update.exe tidak ditemukan.")
+
+    def install_update(self):
+        update_exe = 'update.exe'
+        try:
+            self.close()  # Tutup aplikasi utama
+            subprocess.Popen([update_exe, "--install"])  # Jalankan updater untuk instalasi
+            sys.exit()  # Keluar dari aplikasi utama
+        except Exception as e:
+            QMessageBox.critical(self, "Update Error", f"Gagal menginstal update: {str(e)}")
