@@ -375,12 +375,48 @@ class ConsumerTable(TableWidget):
             else:
                 data = self.db.get_consumers(year=current_date.year, month=current_date.month, user_id=self.user_id)
             for row_data in data:
-                self.add_row(row_data[1:])  # Exclude id
+                formatted_data = list(row_data[1:])  # Exclude id
+                formatted_data[4] = self.format_currency(formatted_data[4])  # Format total proyek
+                self.add_row(formatted_data)
+    
+    def add_row(self, data, new_id=None):
+        row_position = self.table.rowCount()
+        self.table.insertRow(row_position)
+        for column, item in enumerate(data):
+            if column == 4:  # Kolom Total Proyek
+                formatted_value = self.format_currency(item)
+                self.table.setItem(row_position, column, QTableWidgetItem(formatted_value))
+            else:
+                self.table.setItem(row_position, column, QTableWidgetItem(str(item)))
+
+        # Make sure the ID column exists
+        if 'ID' not in [self.table.horizontalHeaderItem(i).text() for i in range(self.table.columnCount())]:
+            self.table.insertColumn(self.table.columnCount())
+            self.table.setHorizontalHeaderItem(self.table.columnCount() - 1, QTableWidgetItem("ID"))
+            self.table.hideColumn(self.table.columnCount() - 1)
+
+        # Set the ID in the last column if provided
+        if new_id is not None:
+            self.table.setItem(row_position, self.table.columnCount() - 1, QTableWidgetItem(str(new_id)))
+        elif len(data) > 0:  # Use the first column as ID if new_id is not provided
+            self.table.setItem(row_position, self.table.columnCount() - 1, QTableWidgetItem(str(data[0])))
 
     def open_add_dialog(self):
         dialog = AddConsumerDialog(self)
         if dialog.exec_():
             data = dialog.get_data()
+
+            # Validasi dan format total proyek
+            if not self.validate_numeric_input(data[4]):
+                QMessageBox.warning(self, "Error", "Total proyek harus berupa angka tanpa huruf atau karakter khusus.")
+                return
+
+            try:
+                data[4] = self.format_currency(self.parse_currency(data[4]))
+            except (IndexError, ValueError) as e:
+                QMessageBox.warning(self, "Error", f"Total proyek tidak valid: {str(e)}")
+                return
+
             if self.is_viewing_history:
                 self.db.add_to_closed_book(self.current_book_name, dict(zip(COLUMN_MAPPINGS['consumers'].keys(), data)))
                 self.load_data()  # Reload data to show the new entry
@@ -389,6 +425,7 @@ class ConsumerTable(TableWidget):
                 new_id = self.db.insert_consumer(data, year=current_date.year, month=current_date.month, user_id=self.user_id)
                 self.add_row((new_id,) + tuple(data))
                 self.load_data()  # Reload data to show the new entry
+
             QMessageBox.information(self, "Sukses", "Data konsumen berhasil ditambahkan.")
 
     def open_edit_dialog(self):
@@ -404,7 +441,10 @@ class ConsumerTable(TableWidget):
         for col in range(self.table.columnCount()):
             item = self.table.item(selected_row, col)
             if item is not None:
-                initial_data.append(item.text())
+                if col == 4:  # Kolom Total Proyek
+                    initial_data.append(self.parse_currency(item.text()))
+                else:
+                    initial_data.append(item.text())
             else:
                 initial_data.append("")
 
@@ -412,9 +452,21 @@ class ConsumerTable(TableWidget):
 
         if dialog.exec_():
             data = dialog.get_data()
+        
+            # Validasi dan format total proyek
+            if not self.validate_numeric_input(data[4]):
+                QMessageBox.warning(self, "Error", "Total proyek harus berupa angka tanpa huruf atau karakter khusus.")
+                return
+
+            try:
+                data[4] = self.format_currency(self.parse_currency(data[4]))
+            except (IndexError, ValueError) as e:
+                QMessageBox.warning(self, "Error", f"Total proyek tidak valid: {str(e)}")
+                return
+
             for col, item_text in enumerate(data):
                 self.table.setItem(selected_row, col, QTableWidgetItem(str(item_text) if item_text is not None else ""))
-        
+
             if self.is_viewing_history:
                 record_id = self.db.load_closed_book(self.current_book_name)[selected_row][0]
                 self.db.update_in_closed_book(self.current_book_name, record_id, dict(zip(COLUMN_MAPPINGS['consumers'].keys(), data)))
@@ -424,8 +476,28 @@ class ConsumerTable(TableWidget):
                 record_id = consumers[selected_row][0]
                 self.db.update_consumer(record_id, data, self.user_id)
                 self.load_data()  # Reload current data to reflect changes
-        
+
             QMessageBox.information(self, "Sukses", "Data konsumen berhasil diedit.")
+    
+    def validate_numeric_input(self, value):
+        cleaned_value = str(value).replace('Rp', '').replace('.', '').replace(',', '').strip()
+        return cleaned_value.isdigit()
+    
+    def format_currency(self, value):
+        try:
+            if isinstance(value, str):
+                value = self.parse_currency(value)
+            rounded_value = int(value)
+            return f"Rp {rounded_value:,}".replace(',', '.')
+        except ValueError:
+            return str(value)
+
+    def parse_currency(self, value):
+        cleaned_value = str(value).replace('Rp', '').replace('.', '').replace(',', '').strip()
+        try:
+            return int(float(cleaned_value))
+        except ValueError:
+            return 0
 
     def delete_selected_row(self):
         selected_items = self.table.selectedItems()
@@ -1107,11 +1179,11 @@ class TukangTable(TableWidget):
         dialog = AddTukangProjectDialog(self)
 
         initial_data = []
-        for col in range(1, self.table.columnCount()):  # Start from 1 to ignore ID column
+        for col in range(1, self.table.columnCount()):  # Start from 1 to skip ID column
             item = self.table.item(selected_row, col)
             if item is not None:
                 if col == self.kb_column_index:
-                    initial_data.append(self.parse_currency(item.text()))
+                    initial_data.append(str(self.parse_currency(item.text())))
                 else:
                     initial_data.append(item.text())
             else:
@@ -1124,42 +1196,55 @@ class TukangTable(TableWidget):
             if not self.validate_numeric_input(data[4]):  # KB validation
                 QMessageBox.warning(self, "Invalid Input", "KB harus berupa angka.")
                 return
-            for col, item_text in enumerate(data, start=1):  # Start from 1 to ignore ID column
+        
+            for col, item_text in enumerate(data, start=1):  # Start from 1 to skip ID column
                 if col == self.kb_column_index:
-                    formatted_value = self.format_currency(item_text)
+                    parsed_value = self.parse_currency(item_text)
+                    formatted_value = self.format_currency(parsed_value)
                     self.table.setItem(selected_row, col, QTableWidgetItem(formatted_value))
                 else:
                     self.table.setItem(selected_row, col, QTableWidgetItem(str(item_text)))
 
             if self.is_viewing_history:
-                record_id = self.db.load_closed_book(self.current_book_name)[selected_row][0]
-                self.db.update_in_closed_book(self.current_book_name, record_id, dict(zip(COLUMN_MAPPINGS['worker_projects'].keys(), data)))
+                closed_book_data = self.db.load_closed_book(self.current_book_name)
+                if selected_row < len(closed_book_data):
+                    record_id = closed_book_data[selected_row][0]
+                    self.db.update_in_closed_book(self.current_book_name, record_id, dict(zip(COLUMN_MAPPINGS['worker_projects'].keys(), data)))
+                else:
+                    QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan diupdate.")
+                    return
             else:
                 project_id = int(self.table.item(selected_row, 0).text())  # Get ID from hidden column
                 self.db.update_worker_project(project_id, data, self.user_id)
-            
+        
+            self.load_data()  # Reload data to reflect changes
             QMessageBox.information(self, "Sukses", "Data proyek tukang berhasil diedit.")
 
     def validate_numeric_input(self, value):
-        try:
-            float(value)
-            return True
-        except ValueError:
-            return False
+        # Hapus format mata uang dan separator ribuan
+        cleaned_value = str(value).replace('Rp', '').replace('.', '').replace(',', '').strip()
+        # Periksa apakah string hanya terdiri dari digit
+        return cleaned_value.isdigit()
 
     def format_currency(self, value):
         try:
-            # Remove any existing formatting
-            value = str(value).replace('Rp', '').replace(',', '').strip()
-            # Convert to float and format
-            return f"Rp {float(value):,.2f}"
+            # Remove any existing formatting and convert to float
+            if isinstance(value, str):
+                value = self.parse_currency(value)
+            # Round to nearest integer and format without decimal places
+            rounded_value = int(value)  # Convert to int to avoid decimal-related issues
+            return f"Rp {rounded_value:,}".replace(',', '.')
         except ValueError:
             # If conversion fails, return the original value
-            return value
+            return str(value)
 
     def parse_currency(self, value):
-        # Remove 'Rp ' prefix and thousand separators
-        return float(value.replace('Rp ', '').replace(',', ''))
+        # Remove currency symbol and separators, then convert to float
+        cleaned_value = str(value).replace('Rp', '').replace('.', '').replace(',', '').strip()
+        try:
+            return int(float(cleaned_value))
+        except ValueError:
+            return 0
 
     def delete_selected_row(self):
         selected_items = self.table.selectedItems()
@@ -1261,7 +1346,6 @@ class TukangTable(TableWidget):
         self.close_book_button.hide()
         self.view_history_button.hide()
     
-        # Perbaikan pada baris ini
         self.return_button = QPushButton("Kembali ke Data Saat Ini")
         self.return_button.clicked.connect(self.return_to_current_data)
         self.button_layout.addWidget(self.return_button)
@@ -1423,13 +1507,21 @@ class MaterialTable(TableWidget):
             self.edit_project_button.show()
             self.delete_project_button.show()
     
-    def parse_currency(self, value):
-        # Hapus 'Rp ', pemisah ribuan, dan konversi ke float
-        return float(value.replace('Rp ', '').replace('.', '').replace(',', '.'))
-
     def format_currency(self, value):
-        # Format float ke string mata uang
-        return f"Rp {value:,.0f}".replace(',', '.')
+        try:
+            if isinstance(value, str):
+                value = self.parse_currency(value)
+            rounded_value = int(value)
+            return f"Rp {rounded_value:,}".replace(',', '.')
+        except ValueError:
+            return str(value)
+
+    def parse_currency(self, value):
+        cleaned_value = str(value).replace('Rp', '').replace('.', '').replace(',', '').strip()
+        try:
+            return int(float(cleaned_value))
+        except ValueError:
+            return 0
 
     def create_new_project(self):
         dialog = ProjectInputDialog(self)
@@ -1476,7 +1568,6 @@ class MaterialTable(TableWidget):
         if dialog.exec_() == QDialog.Accepted:
             updated_data = dialog.get_project_data()
         
-            # Cek apakah nama proyek sudah berubah dan apakah nama baru sudah ada
             if updated_data['Nama Proyek'].lower() != project[1].lower():
                 existing_project_names = [p[1].lower() for p in projects if p[0] != self.current_project_id]
                 if updated_data['Nama Proyek'].lower() in existing_project_names:
@@ -1664,10 +1755,9 @@ class MaterialTable(TableWidget):
             price_float = float(price)
             return f"Rp {price_float:,.0f}".replace(',', '.')
         except ValueError:
-            return price  # Return original value if conversion fails
+            return price 
     
     def add_additional_info(self, sheet):
-        # Write project details
         project = next((p for p in self.db.get_projects(self.user_id) if p[0] == self.current_project_id), None)
         if project:
             project_details = [
@@ -1683,10 +1773,11 @@ class MaterialTable(TableWidget):
                 row = sheet.max_row + 1
                 sheet.cell(row=row, column=1, value=label).font = Font(bold=True)
                 sheet.cell(row=row, column=2, value=value)
-    
-        # Add total price and profit
+
         total_price = self.parse_currency(self.total_price_label.text().split(": ")[1])
         total_profit = self.parse_currency(self.total_profit_label.text().split(": ")[1])
+
+        sheet.append([""] * sheet.max_column)
     
         sheet.cell(row=sheet.max_row + 1, column=1, value="Total Harga").font = Font(bold=True)
         sheet.cell(row=sheet.max_row, column=2, value=self.format_currency(total_price))
@@ -1695,11 +1786,9 @@ class MaterialTable(TableWidget):
         sheet.cell(row=sheet.max_row, column=2, value=self.format_currency(total_profit))
 
     def close_book(self):
-        # MaterialTable doesn't have a close book function
         pass
 
     def view_history(self):
-        # MaterialTable doesn't have a view history function
         pass
 
 class DateInputDialog(QDialog):
