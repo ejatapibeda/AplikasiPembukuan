@@ -85,13 +85,13 @@ class AddConsumerDialog(AddDialog):
         ]
 
     def load_data(self, data):
-        self.name_input.setText(data[0])
-        self.address_input.setText(data[1])
-        self.sales_input.setText(data[2])
-        self.job_input.setText(data[3])
-        self.total_projects_input.setText(data[4])
-        self.worker_input.setText(data[5])
-        self.notes_input.setText(data[6])
+        self.name_input.setText(str(data[0]))
+        self.address_input.setText(str(data[1]))
+        self.sales_input.setText(str(data[2]))
+        self.job_input.setText(str(data[3]))
+        self.total_projects_input.setText(str(data[4]))
+        self.worker_input.setText(str(data[5]))
+        self.notes_input.setText(str(data[6]))
 
 class ProjectInputDialog(QDialog):
     def __init__(self, parent=None, initial_data=None):
