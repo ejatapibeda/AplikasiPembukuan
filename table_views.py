@@ -1,10 +1,12 @@
-from PyQt5.QtWidgets import QWidget, QFrame , QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QMessageBox, QInputDialog, QDateEdit, QSpacerItem, QDialog, QSizePolicy
-from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import QWidget, QFrame , QMenu, QDialogButtonBox, QVBoxLayout, QLabel, QTableWidget, QTextEdit, QTableWidgetItem, QHeaderView, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QMessageBox, QInputDialog, QDateEdit, QSpacerItem, QDialog, QSizePolicy
+from PyQt5.QtGui import QFont, QPixmap, QColor, QCursor
 from PyQt5.QtCore import Qt, QDate
 import openpyxl
-from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, Alignment
 from datetime import datetime
-import re
+import os
+import subprocess
 
 from dialogs import AddConsumerDialog, ProjectInputDialog, AddTukangDialog, AddMaterialDialog, AddSalesProjectDialog, AddTukangProjectDialog
 from database import DatabaseManager, COLUMN_MAPPINGS
@@ -43,6 +45,8 @@ class TableWidget(QWidget):
         self.user_id = None
         self.setup_ui()
 
+        self.table.cellDoubleClicked.connect(self.show_full_note)
+
     def setup_ui(self):
         self.layout = QVBoxLayout(self)
         
@@ -79,6 +83,32 @@ class TableWidget(QWidget):
                     match = True
                     break
             self.table.setRowHidden(row, not match)
+    
+    def show_full_note(self, row, column):
+        item = self.table.item(row, column)
+        if item:
+            header_item = self.table.horizontalHeaderItem(column)
+            column_name = header_item.text() if header_item else f"Column {column}"
+            note = item.text()
+    
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"{column_name} Lengkap")
+            layout = QVBoxLayout(dialog)
+    
+            text_edit = QTextEdit(dialog)
+            text_edit.setPlainText(note)
+            text_edit.setReadOnly(True)
+            text_edit.setLineWrapMode(QTextEdit.WidgetWidth)
+            text_edit.setMinimumSize(600, 300)
+            layout.addWidget(text_edit)
+    
+            close_button = QPushButton("Tutup", dialog)
+            close_button.clicked.connect(dialog.close)
+            layout.addWidget(close_button)
+    
+            dialog.setLayout(layout)
+            dialog.exec_()
+
 
     def setup_buttons(self):
         self.button_layout = QHBoxLayout()
@@ -301,22 +331,21 @@ class TableWidget(QWidget):
                     if not self.table.isColumnHidden(column):
                         item = self.table.item(row, column)
                         if item is not None:
-                            sheet.cell(row=row+2, column=col_index, value=item.text())
+                            cell = sheet.cell(row=row+2, column=col_index, value=item.text())
+                            if headers[col_index-1] == "Keterangan":
+                                cell.alignment = Alignment(wrapText=True, vertical='top')
+                                cell = self.format_keterangan_cell(cell)
                         else:
                             sheet.cell(row=row+2, column=col_index, value='')
                         col_index += 1
-            
-            # Add two blank rows for separation
-            sheet.append([""] * sheet.max_column)
-            sheet.append([""] * sheet.max_column)
-            
-            # Add any additional information specific to the table type
+
+            sheet.append([""] * sheet.max_column)            
             self.add_additional_info(sheet)
             
             # Adjust column widths
             for column in sheet.columns:
                 max_length = 0
-                column_letter = column[0].column_letter
+                column_letter = get_column_letter(column[0].column)
                 for cell in column:
                     try:
                         if len(str(cell.value)) > max_length:
@@ -328,6 +357,21 @@ class TableWidget(QWidget):
             
             workbook.save(file_name)
             QMessageBox.information(self, "Export Successful", f"Data has been exported to {file_name}")
+
+    def format_keterangan_cell(self, cell, words_per_line=10):
+        if cell.value:
+            words = cell.value.split()
+            lines = []
+            current_line = []
+            for word in words:
+                current_line.append(word)
+                if len(current_line) == words_per_line:
+                    lines.append(' '.join(current_line))
+                    current_line = []
+            if current_line:
+                lines.append(' '.join(current_line))
+            cell.value = '\n'.join(lines)
+        return cell
 
     def add_additional_info(self, sheet):
         # This method can be overridden in subclasses to add table-specific information
@@ -376,14 +420,14 @@ class ConsumerTable(TableWidget):
                 data = self.db.get_consumers(year=current_date.year, month=current_date.month, user_id=self.user_id)
             for row_data in data:
                 formatted_data = list(row_data[1:])  # Exclude id
-                formatted_data[4] = self.format_currency(formatted_data[4])  # Format total proyek
+                formatted_data[5] = self.format_currency(formatted_data[5])  # Format total proyek
                 self.add_row(formatted_data)
     
     def add_row(self, data, new_id=None):
         row_position = self.table.rowCount()
         self.table.insertRow(row_position)
         for column, item in enumerate(data):
-            if column == 4:  # Kolom Total Proyek
+            if column == 5:  # Kolom Total Proyek
                 formatted_value = self.format_currency(item)
                 self.table.setItem(row_position, column, QTableWidgetItem(formatted_value))
             else:
@@ -405,26 +449,27 @@ class ConsumerTable(TableWidget):
         dialog = AddConsumerDialog(self)
         if dialog.exec_():
             data = dialog.get_data()
+            current_date = QDate.currentDate().toString("dd/MM/yyyy")  # Add current date as the first item
+            print(f"Data: {data}")
 
-            # Validasi dan format total proyek
-            if not self.validate_numeric_input(data[4]):
+            if not self.validate_numeric_input(data[5]):  # Adjust index for Total Proyek
                 QMessageBox.warning(self, "Error", "Total proyek harus berupa angka tanpa huruf atau karakter khusus.")
                 return
 
             try:
-                data[4] = self.format_currency(self.parse_currency(data[4]))
+                data[5] = self.format_currency(self.parse_currency(data[5]))  # Adjust index for Total Proyek
             except (IndexError, ValueError) as e:
                 QMessageBox.warning(self, "Error", f"Total proyek tidak valid: {str(e)}")
                 return
 
             if self.is_viewing_history:
                 self.db.add_to_closed_book(self.current_book_name, dict(zip(COLUMN_MAPPINGS['consumers'].keys(), data)))
-                self.load_data()  # Reload data to show the new entry
+                self.load_data()
             else:
                 current_date = datetime.now()
                 new_id = self.db.insert_consumer(data, year=current_date.year, month=current_date.month, user_id=self.user_id)
                 self.add_row((new_id,) + tuple(data))
-                self.load_data()  # Reload data to show the new entry
+                self.load_data()
 
             QMessageBox.information(self, "Sukses", "Data konsumen berhasil ditambahkan.")
 
@@ -441,25 +486,27 @@ class ConsumerTable(TableWidget):
         for col in range(self.table.columnCount()):
             item = self.table.item(selected_row, col)
             if item is not None:
-                if col == 4:  # Kolom Total Proyek
-                    initial_data.append(self.parse_currency(item.text()))
+                if col == 5:  # Kolom Total Proyek
+                    initial_data.append(str(self.parse_currency(item.text())))
                 else:
                     initial_data.append(item.text())
             else:
                 initial_data.append("")
-
+        
+        print(f"Initial data: {initial_data}")
         dialog.load_data(initial_data)
 
         if dialog.exec_():
             data = dialog.get_data()
-        
+            print(f"Data: {data}")
+    
             # Validasi dan format total proyek
-            if not self.validate_numeric_input(data[4]):
+            if not self.validate_numeric_input(data[5]):
                 QMessageBox.warning(self, "Error", "Total proyek harus berupa angka tanpa huruf atau karakter khusus.")
                 return
 
             try:
-                data[4] = self.format_currency(self.parse_currency(data[4]))
+                data[5] = self.format_currency(self.parse_currency(data[5]))
             except (IndexError, ValueError) as e:
                 QMessageBox.warning(self, "Error", f"Total proyek tidak valid: {str(e)}")
                 return
@@ -628,6 +675,7 @@ class SalesTable(TableWidget):
         self.setup_table()
         self.setup_sales_buttons()
         self.setup_total_commission_label()
+        self.setup_view_photo_button()
 
 
     def set_user_id(self, user_id):
@@ -641,42 +689,105 @@ class SalesTable(TableWidget):
         self.table.setColumnCount(len(column_names))
         self.table.setHorizontalHeaderLabels(column_names)
         self.table.hideColumn(0)  # Hide ID column
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
     
     def setup_total_commission_label(self):
         self.total_commission_label = QLabel("Total Komisi: Rp 0")
-        self.total_commission_label.setStyleSheet("font-size: 17px; font-weight: bold;")
+        self.total_commission_label.setStyleSheet("font-size: 20px; font-weight: bold;")
         self.total_commission_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.layout.addWidget(self.total_commission_label)
 
+        self.total_kb_label = QLabel("Total KB: Rp 0")
+        self.total_kb_label.setStyleSheet("font-size: 20px; font-weight: bold;")
+        self.total_kb_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.layout.addWidget(self.total_kb_label)
+
     def setup_sales_buttons(self):
-        self.new_sales_button = QPushButton("Sales Baru")
-        self.new_sales_button.clicked.connect(self.create_new_sales)
-        self.button_layout.addWidget(self.new_sales_button)
 
         self.select_sales_button = QPushButton("Pilih Sales")
         self.select_sales_button.clicked.connect(self.select_sales)
         self.button_layout.addWidget(self.select_sales_button)
 
-        self.edit_sales_button = QPushButton("Edit Sales")
-        self.edit_sales_button.clicked.connect(self.edit_sales)
-        self.button_layout.addWidget(self.edit_sales_button)
-        self.edit_sales_button.hide()
+        self.setting_button = QPushButton("Setting")
+        self.setting_button.clicked.connect(self.open_settings)
+        self.button_layout.addWidget(self.setting_button)
+        self.setting_button.hide()
 
-        self.delete_sales_button = QPushButton("Hapus Sales")
-        self.delete_sales_button.clicked.connect(self.delete_sales)
-        self.button_layout.addWidget(self.delete_sales_button)
-        self.delete_sales_button.hide()
+    def open_settings(self):
+        menu = QDialog(self)
+        menu.setWindowTitle("Setting Sales")
+        menu.setMinimumWidth(400)
+        layout = QVBoxLayout(menu)
 
-    def create_new_sales(self):
+        new_sales_button = QPushButton("Sales Baru")
+        new_sales_button.clicked.connect(lambda: self.create_new_sales(menu))
+        layout.addWidget(new_sales_button)
+
+        edit_sales_button = QPushButton("Edit Sales")
+        edit_sales_button.clicked.connect(lambda: self.edit_sales(menu))
+        layout.addWidget(edit_sales_button)
+
+        delete_sales_button = QPushButton("Hapus Sales")
+        delete_sales_button.clicked.connect(lambda: self.delete_sales(menu))
+        layout.addWidget(delete_sales_button)
+
+        # Disable edit and delete buttons if no sales is selected
+        edit_sales_button.setEnabled(self.current_sales_id is not None)
+        delete_sales_button.setEnabled(self.current_sales_id is not None)
+
+        menu.setLayout(layout)
+        menu.exec_()
+    
+    def view_photo(self):
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            return
+
+        selected_row = selected_items[0].row()
+
+        if self.is_viewing_history:
+            closed_book_data = self.db.load_closed_book(self.current_book_name)
+            if selected_row < len(closed_book_data):
+                project_id = closed_book_data[selected_row][0]
+                photo_path = closed_book_data[selected_row][-1]  # Assuming photo_path is the last column
+            else:
+                QMessageBox.warning(self, "Error", "Tidak dapat menemukan data proyek.")
+                return
+        else:
+            project_id = self.table.item(selected_row, 0).text()  # Assuming ID is in the first column
+            photo_path = self.db.get_sales_project_photo(project_id, self.user_id)
+
+        if photo_path and os.path.exists(photo_path):
+            dialog = PhotoViewerDialog(self, photo_path)
+            dialog.exec_()
+        else:
+            QMessageBox.information(self, "Tidak Ada Gambar", "Tidak ada gambar tersedia untuk proyek ini.")
+
+    def setup_view_photo_button(self):
+        self.view_photo_button = QPushButton("Lihat Gambar")
+        self.view_photo_button.clicked.connect(self.view_photo)
+        self.view_photo_button.hide()  # Sembunyikan tombol saat inisialisasi
+        self.button_layout.addWidget(self.view_photo_button)
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
+
+
+    def on_selection_changed(self):
+        selected_items = self.table.selectedItems()
+        if selected_items:
+            self.view_photo_button.show()
+        else:
+            self.view_photo_button.hide()
+
+
+    def create_new_sales(self, menu):
         sales_name, ok = QInputDialog.getText(self, "Sales Baru", "Nama Sales:")
         if ok and sales_name:
             self.current_sales_id = self.db.insert_sales(sales_name, self.user_id)
             self.current_sales_name = sales_name
             self.update_sales_info()
             self.load_data()
-            self.edit_sales_button.show()
-            self.delete_sales_button.show()
             QMessageBox.information(self, "Sukses", f"Sales '{sales_name}' berhasil dibuat dan dipilih.")
+            menu.close()
 
     def select_sales(self):
         sales_list = self.db.get_sales_list(self.user_id)
@@ -684,18 +795,61 @@ class SalesTable(TableWidget):
             QMessageBox.warning(self, "Tidak Ada Sales", "Tidak ada sales yang tersedia. Silakan buat sales baru terlebih dahulu.")
             return
 
-        sales_names = [sales[1] for sales in sales_list]
-        sales_name, ok = QInputDialog.getItem(self, "Pilih Sales", "Sales:", sales_names, 0, False)
-        if ok and sales_name:
-            selected_sales = next(sales for sales in sales_list if sales[1] == sales_name)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Pilih Sales")
+        layout = QVBoxLayout(dialog)
+        dialog.setMinimumWidth(400)
+        dialog.setMinimumHeight(300)
+
+        # Tambahkan input pencarian
+        search_input = QLineEdit(dialog)
+        search_input.setPlaceholderText("Cari sales...")
+        layout.addWidget(search_input)
+
+        # Gunakan QTableWidget dengan hanya satu kolom
+        sales_table = QTableWidget(dialog)
+        sales_table.setColumnCount(1)
+        sales_table.setHorizontalHeaderLabels(["Nama Sales"])
+        sales_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        sales_table.verticalHeader().setVisible(False)
+        sales_table.setSelectionBehavior(QTableWidget.SelectRows)
+        sales_table.setSelectionMode(QTableWidget.SingleSelection)
+        layout.addWidget(sales_table)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        # Fungsi untuk mengisi tabel dengan data sales
+        def populate_table(filter_text=""):
+            sales_table.setRowCount(0)
+            for sales in sales_list:
+                if filter_text.lower() in sales[1].lower():
+                    row = sales_table.rowCount()
+                    sales_table.insertRow(row)
+                    sales_table.setItem(row, 0, QTableWidgetItem(sales[1]))
+                
+                    # Set warna latar belakang selang-seling
+                    if row % 2 == 0:
+                        sales_table.item(row, 0).setBackground(QColor("#34485c"))
+
+        # Hubungkan input pencarian ke fungsi filter
+        search_input.textChanged.connect(populate_table)
+
+        # Isi tabel awal
+        populate_table()
+
+        if dialog.exec_() == QDialog.Accepted and sales_table.currentRow() >= 0:
+            selected_sales_name = sales_table.item(sales_table.currentRow(), 0).text()
+            selected_sales = next(sales for sales in sales_list if sales[1] == selected_sales_name)
             self.current_sales_id = selected_sales[0]
             self.current_sales_name = selected_sales[1]
             self.update_sales_info()
             self.load_data()
-            self.edit_sales_button.show()
-            self.delete_sales_button.show()
+            self.setting_button.show()
 
-    def edit_sales(self):
+    def edit_sales(self, menu):
         if not self.current_sales_id:
             QMessageBox.warning(self, "No Sales Selected", "Please select a sales first.")
             return
@@ -707,8 +861,10 @@ class SalesTable(TableWidget):
             self.db.update_sales(self.current_sales_id, sales_name, self.user_id)
             self.update_sales_info()
             QMessageBox.information(self, "Success", "Sales updated successfully.")
+        
+        menu.close()
 
-    def delete_sales(self):
+    def delete_sales(self, menu):
         if not self.current_sales_id:
             QMessageBox.warning(self, "No Sales Selected", "Please select a sales first.")
             return
@@ -724,20 +880,25 @@ class SalesTable(TableWidget):
             self.current_sales_name = ""
             self.update_sales_info()
             self.load_data()
-            self.edit_sales_button.hide()
-            self.delete_sales_button.hide()
+            self.select_sales_button.hide()
             QMessageBox.information(self, "Success", "Sales deleted successfully.")
         else:
             QMessageBox.information(self, "Cancelled", "Penghapusan sales dibatalkan.")
+        
+        menu.close()
     
     def load_data(self):
         self.table.setRowCount(0)  # Clear existing data
         if self.current_sales_id is not None:
             if self.is_viewing_history:
+                self.select_sales_button.hide()
+                self.setting_button.hide()
                 projects = self.db.load_closed_book(self.current_book_name)
                 for project in projects:
                     self.add_row(project[1:])  # Skip the ID column
             else:
+                self.select_sales_button.show()
+                self.setting_button.show()
                 projects = self.db.get_sales_projects(self.current_sales_id, self.user_id)
                 for project in projects:
                     self.add_row(project)
@@ -752,45 +913,54 @@ class SalesTable(TableWidget):
                 self.table.setItem(row_position, column, QTableWidgetItem(formatted_value))
             else:
                 self.table.setItem(row_position, column, QTableWidgetItem(str(item)))
+    
         self.update_total_commission()
+
 
     def update_sales_info(self):
         if self.current_sales_id is not None:
             self.title_label.setText(f"Daftar Proyek Sales - {self.current_sales_name}")
+            self.setting_button.show()  # Tampilkan tombol setting
         else:
             self.title_label.setText("Daftar Proyek Sales")
+            self.setting_button.hide()  # Sembunyikan tombol setting
     
     def update_total_commission(self):
         total_commission = 0
+        total_kb = 0
         for row in range(self.table.rowCount()):
             commission_item = self.table.item(row, self.commission_column_index)
-            if commission_item and commission_item.text():
+            kb_item = self.table.item(row, self.kb_column_index)
+            if commission_item and commission_item.text() and kb_item and kb_item.text():
                 try:
-                    print(f"didiidParsing commission value at row {row}: {commission_item.text()}")  # Debugging statement
                     commission_value = self.parse_currency(commission_item.text())
+                    kb_value = self.parse_currency(kb_item.text())
                     total_commission += commission_value
+                    total_kb += kb_value
                 except ValueError:
-                    print(f"Invalid commission value at row {row}: {commission_item.text()}")
+                    print(f"Invalid commission or KB value at row {row}")
     
-        formatted_total = self.format_currency(total_commission)
-        self.total_commission_label.setText(f"Total Komisi: {formatted_total}")
-        self.total_commission = total_commission
-        
+        net_commission = total_commission - total_kb
+        self.total_commission_label.setText(f"Total Komisi: {self.format_currency(net_commission)}")
+        self.total_kb_label.setText(f"Total KB: {self.format_currency(total_kb)}")
+        self.total_commission = net_commission
+
     def open_add_dialog(self):
         if self.current_sales_id:
             dialog = AddSalesProjectDialog(self)
             if dialog.exec_():
                 data = dialog.get_data()
+                photo_path = dialog.get_photo_path()
                 if not self.validate_numeric_input(data[3]) or not self.validate_numeric_input(data[4]) or not self.validate_numeric_input(data[5]):
                     QMessageBox.warning(self, "Invalid Input", "Total Proyek, Komisi, dan KB harus berupa angka.")
                     return
                 if self.is_viewing_history:
-                    self.db.add_to_closed_book(self.current_book_name, dict(zip(COLUMN_MAPPINGS['sales_projects'].keys(), data)))
+                    new_id = self.db.add_to_closed_book(self.current_book_name, dict(zip(COLUMN_MAPPINGS[self.table_name].keys(), data)), photo_path, self.user_id, self.current_sales_id)
                     self.load_data()
                 else:
                     now = datetime.now()
                     year, month = now.year, now.month
-                    new_id = self.db.insert_sales_project(self.current_sales_id, data, year, month, self.user_id)
+                    new_id = self.db.insert_sales_project(self.current_sales_id, data, year, month, self.user_id, photo_path)
                     formatted_data = list(data)
                     formatted_data[3] = self.format_currency(data[3])  # Format Total Proyek
                     formatted_data[4] = self.format_currency(data[4])  # Format Komisi
@@ -827,6 +997,7 @@ class SalesTable(TableWidget):
         if dialog.exec_():
             if dialog.validate_data():
                 data = dialog.get_data()
+                photo_path = dialog.get_photo_path()
                 for col, item_text in enumerate(data, start=1):  # Start from 1 to skip ID column
                     if col in [4, 5, 6]:  # Total Proyek, Komisi, dan KB columns
                         parsed_value = self.parse_currency(item_text)
@@ -834,12 +1005,12 @@ class SalesTable(TableWidget):
                         self.table.setItem(selected_row, col, QTableWidgetItem(formatted_value))
                     else:
                         self.table.setItem(selected_row, col, QTableWidgetItem(str(item_text) if item_text is not None else ""))
-        
+    
                 if self.is_viewing_history:
                     closed_book_data = self.db.load_closed_book(self.current_book_name)
                     if selected_row < len(closed_book_data):
                         record_id = closed_book_data[selected_row][0]
-                        self.db.update_in_closed_book(self.current_book_name, record_id, dict(zip(COLUMN_MAPPINGS['sales_projects'].keys(), data)))
+                        self.db.update_in_closed_book(self.current_book_name, record_id, dict(zip(COLUMN_MAPPINGS[self.table_name].keys(), data)), photo_path, self.user_id, self.current_sales_id)
                     else:
                         QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan diupdate.")
                         return
@@ -847,11 +1018,11 @@ class SalesTable(TableWidget):
                     sales_projects = self.db.get_sales_projects(self.current_sales_id, self.user_id)
                     if selected_row < len(sales_projects):
                         project_id = sales_projects[selected_row][0]
-                        self.db.update_sales_project(project_id, data, self.user_id)
+                        self.db.update_sales_project(project_id, data, self.user_id, photo_path)
                     else:
                         QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan diupdate.")
                         return
-            
+        
                 self.update_total_commission()
                 QMessageBox.information(self, "Sukses", "Data proyek sales berhasil diedit.")
             else:
@@ -889,7 +1060,6 @@ class SalesTable(TableWidget):
             return 0.0
 
 
-
     def delete_selected_row(self):
         selected_items = self.table.selectedItems()
         if not selected_items:
@@ -897,7 +1067,7 @@ class SalesTable(TableWidget):
             return
 
         reply = QMessageBox.question(self, 'Konfirmasi Hapus', 'Anda yakin ingin menghapus data ini?',
-                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
             selected_row = selected_items[0].row()
 
@@ -905,25 +1075,44 @@ class SalesTable(TableWidget):
                 closed_book_data = self.db.load_closed_book(self.current_book_name)
                 if selected_row < len(closed_book_data):
                     record_id = closed_book_data[selected_row][0]
+                    photo_path = closed_book_data[selected_row][-1]  # Assuming photo_path is the last column
+                
+                    # Delete photo if it exists
+                    if photo_path and os.path.exists(photo_path):
+                        os.remove(photo_path)
+                    
+                        # Delete the parent folder if it's empty
+                        parent_folder = os.path.dirname(photo_path)
+                        if not os.listdir(parent_folder):
+                            os.rmdir(parent_folder)
+                
                     self.db.delete_from_closed_book(self.current_book_name, record_id)
                 else:
                     QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan dihapus.")
                     return
             else:
-                if self.current_sales_id is None:
-                    QMessageBox.warning(self, "Error", "Tidak ada sales yang dipilih.")
-                    return
-                projects = self.db.get_sales_projects(self.current_sales_id, self.user_id)
-                if selected_row < len(projects):
-                    record_id = projects[selected_row][0]
+                sales_projects = self.db.get_sales_projects(self.current_sales_id, self.user_id)
+                if selected_row < len(sales_projects):
+                    record_id = sales_projects[selected_row][0]
+                    photo_path = self.db.get_sales_project_photo(record_id, self.user_id)
+                
+                    # Delete photo if it exists
+                    if photo_path and os.path.exists(photo_path):
+                        os.remove(photo_path)
+                    
+                        # Delete the parent folder if it's empty
+                        parent_folder = os.path.dirname(photo_path)
+                        if not os.listdir(parent_folder):
+                            os.rmdir(parent_folder)
+                
                     self.db.delete_record(self.table_name, record_id, self.user_id)
                 else:
                     QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan dihapus.")
                     return
 
             self.table.removeRow(selected_row)
-            self.update_total_commission()
             QMessageBox.information(self, "Hapus Data", "Data berhasil dihapus.")
+            self.update_total_commission()
 
     def close_book(self):
         if self.current_sales_id is None:
@@ -981,17 +1170,17 @@ class SalesTable(TableWidget):
     def display_history(self, data, book_name, original_name):
         self.table.setRowCount(0)  # Clear the current table
         self.title_label.setText(f"Riwayat {self.title_label.text().split(' - ')[0]} - {book_name}")
-    
+
         for row_data in data:
             row_position = self.table.rowCount()
             self.table.insertRow(row_position)
             for column, item in enumerate(row_data[1:]):  # Exclude id
                 self.table.setItem(row_position, column, QTableWidgetItem(str(item)))
-    
-    
+
         self.close_book_button.hide()
         self.view_history_button.hide()
-    
+        self.setting_button.hide()
+
         self.return_button = QPushButton("Kembali ke Data Saat Ini")
         self.return_button.clicked.connect(self.return_to_current_data)
         self.button_layout.addWidget(self.return_button)
@@ -1009,16 +1198,79 @@ class SalesTable(TableWidget):
         self.load_data()
         self.close_book_button.show()
         self.view_history_button.show()
+        if self.current_sales_id:
+           self.setting_button.show()  # Tampilkan kembali tombol setting jika ada sales yang dipilih
+        else:
+           self.setting_button.hide()
         self.add_button.setEnabled(True)
         self.edit_button.setEnabled(True)
         self.delete_button.setEnabled(True)
         self.return_button.setParent(None)
         self.return_button = None
     
-    def add_additional_info(self, sheet):
-        # Add total commission
-        sheet.cell(row=sheet.max_row + 1, column=1, value="Total Komisi:").font = Font(bold=True)
-        sheet.cell(row=sheet.max_row, column=2, value=self.format_currency(self.total_commission))
+    def calculate_totals(self):
+        total_commission = 0
+        total_kb = 0
+        for row in range(self.table.rowCount()):
+            commission_item = self.table.item(row, self.commission_column_index)
+            kb_item = self.table.item(row, self.kb_column_index)
+            if commission_item and commission_item.text() and kb_item and kb_item.text():
+                total_commission += self.parse_currency(commission_item.text())
+                total_kb += self.parse_currency(kb_item.text())
+        return total_commission, total_kb
+
+    def export_to_excel(self):
+        file_name, _ = QFileDialog.getSaveFileName(self, "Save Excel", "", "Excel Files (*.xlsx)")
+        if file_name:
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            
+            # Write headers
+            headers = [self.table.horizontalHeaderItem(i).text() for i in range(self.table.columnCount()) if not self.table.isColumnHidden(i)]
+            for col, header in enumerate(headers, start=1):
+                cell = sheet.cell(row=1, column=col, value=header)
+                cell.font = Font(bold=True)
+            
+            # Write data
+            for row in range(self.table.rowCount()):
+                col_index = 1
+                for column in range(self.table.columnCount()):
+                    if not self.table.isColumnHidden(column):
+                        item = self.table.item(row, column)
+                        if item is not None:
+                            cell = sheet.cell(row=row+2, column=col_index, value=item.text())
+                            if headers[col_index-1] == "Keterangan":
+                                cell.alignment = Alignment(wrapText=True, vertical='top')
+                                cell = self.format_keterangan_cell(cell)
+                        else:
+                            sheet.cell(row=row+2, column=col_index, value='')
+                        col_index += 1
+            
+            sheet.append([""] * sheet.max_column)
+            
+            total_commission, total_kb = self.calculate_totals()
+            row = sheet.max_row + 2
+            sheet.cell(row=row, column=1, value="Total Komisi").font = Font(bold=True)
+            sheet.cell(row=row, column=2, value=self.format_currency(total_commission - total_kb))
+            row += 1
+            sheet.cell(row=row, column=1, value="Total KB").font = Font(bold=True)
+            sheet.cell(row=row, column=2, value=self.format_currency(total_kb))
+            
+            # Adjust column widths
+            for column in sheet.columns:
+                max_length = 0
+                column_letter = get_column_letter(column[0].column)
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(cell.value)
+                    except:
+                        pass
+                adjusted_width = (max_length + 2) * 1.2
+                sheet.column_dimensions[column_letter].width = adjusted_width
+            
+            workbook.save(file_name)
+            QMessageBox.information(self, "Export Successful", f"Data has been exported to {file_name}")
 
 class TukangTable(TableWidget):
     def __init__(self, parent=None):
@@ -1026,7 +1278,8 @@ class TukangTable(TableWidget):
         setup_error_handling()
         self.title_label.setText("Daftar Proyek Tukang")
         self.setup_table()
-        self.setup_tukang_buttons()
+        self.setup_setting_button()
+        self.setup_view_photo_button()
         self.current_tukang_id = None
         self.current_tukang_name = ""
         self.size_column_index = 4
@@ -1036,25 +1289,42 @@ class TukangTable(TableWidget):
         self.table.setColumnCount(len(COLUMN_MAPPINGS[self.table_name]) + 1)  # +1 for ID column
         self.table.setHorizontalHeaderLabels(["ID"] + list(COLUMN_MAPPINGS[self.table_name].keys()))
         self.table.hideColumn(0)  # Hide ID column
-
-    def setup_tukang_buttons(self):
-        self.new_tukang_button = QPushButton("Tukang Baru")
-        self.new_tukang_button.clicked.connect(self.create_new_tukang)
-        self.button_layout.addWidget(self.new_tukang_button)
-
+    
+    def setup_setting_button(self):
         self.select_tukang_button = QPushButton("Pilih Tukang")
         self.select_tukang_button.clicked.connect(self.select_tukang)
         self.button_layout.addWidget(self.select_tukang_button)
 
-        self.edit_tukang_button = QPushButton("Edit Tukang")
-        self.edit_tukang_button.clicked.connect(self.edit_tukang)
-        self.button_layout.addWidget(self.edit_tukang_button)
-        self.edit_tukang_button.hide()
+        self.setting_button = QPushButton("Setting")
+        self.setting_button.clicked.connect(self.open_settings)
+        self.button_layout.addWidget(self.setting_button)
+        self.setting_button.hide()  # Hide the button initially
+    
+    def open_settings(self):
+        menu = QDialog(self)
+        menu.setWindowTitle("Setting Tukang")
+        menu.setMinimumWidth(400)
+        layout = QVBoxLayout(menu)
 
-        self.delete_tukang_button = QPushButton("Hapus Tukang")
-        self.delete_tukang_button.clicked.connect(self.delete_tukang)
-        self.button_layout.addWidget(self.delete_tukang_button)
-        self.delete_tukang_button.hide()
+        new_tukang_button = QPushButton("Tukang Baru")
+        new_tukang_button.clicked.connect(lambda: self.create_new_tukang(menu))
+        layout.addWidget(new_tukang_button)
+
+        edit_tukang_button = QPushButton("Edit Tukang")
+        edit_tukang_button.clicked.connect(lambda: self.edit_tukang(menu))
+        layout.addWidget(edit_tukang_button)
+
+        delete_tukang_button = QPushButton("Hapus Tukang")
+        delete_tukang_button.clicked.connect(lambda: self.delete_tukang(menu))
+        layout.addWidget(delete_tukang_button)
+
+        # Disable edit and delete buttons if no tukang is selected
+        edit_tukang_button.setEnabled(self.current_tukang_id is not None)
+        delete_tukang_button.setEnabled(self.current_tukang_id is not None)
+
+        menu.setLayout(layout)
+        menu.exec_()
+
     
     def add_row(self, data):
         row_position = self.table.rowCount()
@@ -1084,8 +1354,6 @@ class TukangTable(TableWidget):
             self.current_tukang_id = self.db.insert_tukang(tukang_name, self.user_id)
             self.update_tukang_info()
             self.load_data()
-            self.edit_tukang_button.show()
-            self.delete_tukang_button.show()
             QMessageBox.information(self, "Sukses", f"Tukang '{tukang_name}' berhasil dibuat dan dipilih.")
 
     def select_tukang(self):
@@ -1094,15 +1362,59 @@ class TukangTable(TableWidget):
             QMessageBox.warning(self, "Tidak Ada Tukang", "Tidak ada tukang yang tersedia. Silakan buat tukang baru terlebih dahulu.")
             return
 
-        tukang_names = [tukang[1] for tukang in tukang_list]
-        tukang_name, ok = QInputDialog.getItem(self, "Pilih Tukang", "Tukang:", tukang_names, 0, False)
-        if ok and tukang_name:
-            selected_tukang = next(tukang for tukang in tukang_list if tukang[1] == tukang_name)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Pilih Tukang")
+        layout = QVBoxLayout(dialog)
+        dialog.setMinimumWidth(400)
+        dialog.setMinimumHeight(300)
+
+        # Tambahkan input pencarian
+        search_input = QLineEdit(dialog)
+        search_input.setPlaceholderText("Cari tukang...")
+        layout.addWidget(search_input)
+
+        # Gunakan QTableWidget dengan hanya satu kolom
+        tukang_table = QTableWidget(dialog)
+        tukang_table.setColumnCount(1)
+        tukang_table.setHorizontalHeaderLabels(["Nama Tukang"])
+        tukang_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        tukang_table.verticalHeader().setVisible(False)
+        tukang_table.setSelectionBehavior(QTableWidget.SelectRows)
+        tukang_table.setSelectionMode(QTableWidget.SingleSelection)
+        layout.addWidget(tukang_table)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        # Fungsi untuk mengisi tabel dengan data tukang
+        def populate_table(filter_text=""):
+            tukang_table.setRowCount(0)
+            for tukang in tukang_list:
+                if filter_text.lower() in tukang[1].lower():
+                    row = tukang_table.rowCount()
+                    tukang_table.insertRow(row)
+                    tukang_table.setItem(row, 0, QTableWidgetItem(tukang[1]))
+                
+                    # Set warna latar belakang selang-seling
+                    if row % 2 == 0:
+                        tukang_table.item(row, 0).setBackground(QColor("#34485c"))
+
+        # Hubungkan input pencarian ke fungsi filter
+        search_input.textChanged.connect(populate_table)
+
+        # Isi tabel awal
+        populate_table()
+
+        if dialog.exec_() == QDialog.Accepted and tukang_table.currentRow() >= 0:
+            selected_tukang_name = tukang_table.item(tukang_table.currentRow(), 0).text()
+            selected_tukang = next(tukang for tukang in tukang_list if tukang[1] == selected_tukang_name)
             self.current_tukang_id = selected_tukang[0]
+            self.current_tukang_name = selected_tukang[1]
             self.update_tukang_info()
             self.load_data()
-            self.edit_tukang_button.show()
-            self.delete_tukang_button.show()
+            self.setting_button.show()
 
     def edit_tukang(self):
         if not self.current_tukang_id:
@@ -1117,7 +1429,7 @@ class TukangTable(TableWidget):
             self.update_tukang_info()
             QMessageBox.information(self, "Success", "Tukang updated successfully.")
 
-    def delete_tukang(self):
+    def delete_tukang(self, menu=None):
         if not self.current_tukang_id:
             QMessageBox.warning(self, "No Tukang Selected", "Please select a tukang first.")
             return
@@ -1133,35 +1445,79 @@ class TukangTable(TableWidget):
             self.current_tukang_name = ""
             self.update_tukang_info()
             self.load_data()
-            self.edit_tukang_button.hide()
-            self.delete_tukang_button.hide()
+            self.setting_button.hide()  # Add this line
             QMessageBox.information(self, "Success", "Tukang deleted successfully.")
         else:
             QMessageBox.information(self, "Cancelled", "Penghapusan tukang dibatalkan.")
+
+        if menu:
+            menu.close()
 
     def update_tukang_info(self):
         if self.current_tukang_id:
             tukang = self.db.get_tukang(self.current_tukang_id, self.user_id)
             self.current_tukang_name = tukang[1]
             self.title_label.setText(f"Daftar Proyek Tukang - {self.current_tukang_name}")
+            self.setting_button.show()  # Add this line
         else:
             self.title_label.setText("Daftar Proyek Tukang")
+            self.setting_button.hide()  # Add this line
+    
+    def setup_view_photo_button(self):
+        self.view_photo_button = QPushButton("Lihat Gambar")
+        self.view_photo_button.clicked.connect(self.view_photo)
+        self.view_photo_button.hide()
+        self.button_layout.addWidget(self.view_photo_button)
+        self.table.itemSelectionChanged.connect(self.on_selection_changed)
+
+    def on_selection_changed(self):
+        selected_items = self.table.selectedItems()
+        if selected_items:
+            self.view_photo_button.show()
+        else:
+            self.view_photo_button.hide()
+
+    def view_photo(self):
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            return
+
+        selected_row = selected_items[0].row()
+
+        if self.is_viewing_history:
+            closed_book_data = self.db.load_closed_book(self.current_book_name)
+            if selected_row < len(closed_book_data):
+                project_id = closed_book_data[selected_row][0]
+                photo_path = closed_book_data[selected_row][-1]  # Assuming photo_path is the last column
+            else:
+                QMessageBox.warning(self, "Error", "Tidak dapat menemukan data proyek.")
+                return
+        else:
+            project_id = self.table.item(selected_row, 0).text()  # Assuming ID is in the first column
+            photo_path = self.db.get_worker_project_photo(project_id, self.user_id)
+
+        if photo_path and os.path.exists(photo_path):
+            dialog = PhotoViewerDialog(self, photo_path)
+            dialog.exec_()
+        else:
+            QMessageBox.information(self, "Tidak Ada Gambar", "Tidak ada gambar tersedia untuk proyek ini.")
 
     def open_add_dialog(self):
         if self.current_tukang_id:
             dialog = AddTukangProjectDialog(self)
             if dialog.exec_():
                 data = dialog.get_data()
+                photo_path = dialog.get_photo_path()
                 if not self.validate_numeric_input(data[4]):  # KB validation
                     QMessageBox.warning(self, "Invalid Input", "KB harus berupa angka.")
                     return
                 if self.is_viewing_history:
-                    self.db.add_to_closed_book(self.current_book_name, dict(zip(COLUMN_MAPPINGS['worker_projects'].keys(), data)))
+                    new_id = self.db.add_to_closed_book(self.current_book_name, dict(zip(COLUMN_MAPPINGS[self.table_name].keys(), data)), photo_path, self.user_id, self.current_tukang_id)
                     self.load_data()
                 else:
                     now = datetime.now()
                     year, month = now.year, now.month
-                    new_id = self.db.insert_worker_project(self.current_tukang_id, data, year, month, self.user_id)
+                    new_id = self.db.insert_worker_project(self.current_tukang_id, data, year, month, self.user_id, photo_path)
                     formatted_data = list(data)
                     formatted_data[4] = self.format_currency(data[4])  # Format KB
                     self.add_row((new_id,) + tuple(formatted_data))
@@ -1193,6 +1549,7 @@ class TukangTable(TableWidget):
 
         if dialog.exec_():
             data = dialog.get_data()
+            photo_path = dialog.get_photo_path()
             if not self.validate_numeric_input(data[4]):  # KB validation
                 QMessageBox.warning(self, "Invalid Input", "KB harus berupa angka.")
                 return
@@ -1209,13 +1566,13 @@ class TukangTable(TableWidget):
                 closed_book_data = self.db.load_closed_book(self.current_book_name)
                 if selected_row < len(closed_book_data):
                     record_id = closed_book_data[selected_row][0]
-                    self.db.update_in_closed_book(self.current_book_name, record_id, dict(zip(COLUMN_MAPPINGS['worker_projects'].keys(), data)))
+                    self.db.update_in_closed_book(self.current_book_name, record_id, dict(zip(COLUMN_MAPPINGS[self.table_name].keys(), data)), photo_path, self.user_id, self.current_tukang_id)
                 else:
                     QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan diupdate.")
                     return
             else:
                 project_id = int(self.table.item(selected_row, 0).text())  # Get ID from hidden column
-                self.db.update_worker_project(project_id, data, self.user_id)
+                self.db.update_worker_project(project_id, data, self.user_id, photo_path)
         
             self.load_data()  # Reload data to reflect changes
             QMessageBox.information(self, "Sukses", "Data proyek tukang berhasil diedit.")
@@ -1261,6 +1618,17 @@ class TukangTable(TableWidget):
                 closed_book_data = self.db.load_closed_book(self.current_book_name)
                 if selected_row < len(closed_book_data):
                     record_id = closed_book_data[selected_row][0]
+                    photo_path = closed_book_data[selected_row][-1]  # Assuming photo_path is the last column
+                
+                    # Delete photo if it exists
+                    if photo_path and os.path.exists(photo_path):
+                        os.remove(photo_path)
+                    
+                        # Delete the parent folder if it's empty
+                        parent_folder = os.path.dirname(photo_path)
+                        if not os.listdir(parent_folder):
+                            os.rmdir(parent_folder)
+
                     self.db.delete_from_closed_book(self.current_book_name, record_id)
                 else:
                     QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan dihapus.")
@@ -1272,6 +1640,17 @@ class TukangTable(TableWidget):
                 projects = self.db.get_worker_projects(self.current_tukang_id, self.user_id)
                 if selected_row < len(projects):
                     record_id = projects[selected_row][0]
+                    photo_path = self.db.get_worker_project_photo(record_id, self.user_id)
+                
+                    # Delete photo if it exists
+                    if photo_path and os.path.exists(photo_path):
+                        os.remove(photo_path)
+                    
+                        # Delete the parent folder if it's empty
+                        parent_folder = os.path.dirname(photo_path)
+                        if not os.listdir(parent_folder):
+                            os.rmdir(parent_folder)
+                            
                     self.db.delete_record(self.table_name, record_id, self.user_id)
                 else:
                     QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan dihapus.")
@@ -1345,7 +1724,9 @@ class TukangTable(TableWidget):
     
         self.close_book_button.hide()
         self.view_history_button.hide()
-    
+        self.setting_button.hide()
+        self.select_tukang_button.hide()
+
         self.return_button = QPushButton("Kembali ke Data Saat Ini")
         self.return_button.clicked.connect(self.return_to_current_data)
         self.button_layout.addWidget(self.return_button)
@@ -1360,6 +1741,7 @@ class TukangTable(TableWidget):
         self.load_data()
         self.close_book_button.show()
         self.view_history_button.show()
+        self.select_tukang_button.show()
         self.add_button.setEnabled(True)
         self.edit_button.setEnabled(True)
         self.delete_button.setEnabled(True)
@@ -1442,11 +1824,11 @@ class MaterialTable(TableWidget):
 
     def setup_total_labels(self):
         self.total_price_label = QLabel("Total Harga: Rp 0")
-        self.total_price_label.setStyleSheet("font-size: 17px; font-weight: bold;")
+        self.total_price_label.setStyleSheet("font-size: 20px; font-weight: bold;")
         self.layout.addWidget(self.total_price_label)
 
         self.total_profit_label = QLabel("Total Keuntungan: Rp 0")
-        self.total_profit_label.setStyleSheet("font-size: 17px; font-weight: bold;")
+        self.total_profit_label.setStyleSheet("font-size: 20px; font-weight: bold;")
         self.layout.addWidget(self.total_profit_label)
 
     def load_data(self):
@@ -1497,16 +1879,62 @@ class MaterialTable(TableWidget):
             QMessageBox.warning(self, "Tidak Ada Proyek", "Tidak ada proyek yang tersedia. Silakan buat proyek baru terlebih dahulu.")
             return
 
-        project_names = [project[1] for project in projects]
-        project_name, ok = QInputDialog.getItem(self, "Pilih Proyek", "Proyek:", project_names, 0, False)
-        if ok and project_name:
-            selected_project = next(project for project in projects if project[1] == project_name)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Pilih Proyek")
+        layout = QVBoxLayout(dialog)
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(400)
+
+        # Tambahkan input pencarian
+        search_input = QLineEdit(dialog)
+        search_input.setPlaceholderText("Cari proyek...")
+        layout.addWidget(search_input)
+
+        # Gunakan QTableWidget alih-alih QListWidget
+        project_table = QTableWidget(dialog)
+        project_table.setColumnCount(2)
+        project_table.setHorizontalHeaderLabels(["Nama Proyek", "Tanggal Mulai"])
+        project_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        project_table.verticalHeader().setVisible(False)
+        project_table.setSelectionBehavior(QTableWidget.SelectRows)
+        project_table.setSelectionMode(QTableWidget.SingleSelection)
+        layout.addWidget(project_table)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        # Fungsi untuk mengisi tabel dengan data proyek
+        def populate_table(filter_text=""):
+            project_table.setRowCount(0)
+            for i, project in enumerate(projects):
+                if filter_text.lower() in project[1].lower():
+                    row = project_table.rowCount()
+                    project_table.insertRow(row)
+                    project_table.setItem(row, 0, QTableWidgetItem(project[1]))
+                    project_table.setItem(row, 1, QTableWidgetItem(project[4]))
+                
+                    # Set warna latar belakang selang-seling
+                    if row % 2 == 0:
+                        project_table.item(row, 0).setBackground(QColor("#34485c"))
+                        project_table.item(row, 1).setBackground(QColor("#34485c"))
+
+        # Hubungkan input pencarian ke fungsi filter
+        search_input.textChanged.connect(populate_table)
+
+        # Isi tabel awal
+        populate_table()
+
+        if dialog.exec_() == QDialog.Accepted and project_table.currentRow() >= 0:
+            selected_project_name = project_table.item(project_table.currentRow(), 0).text()
+            selected_project = next(project for project in projects if project[1] == selected_project_name)
             self.current_project_id = selected_project[0]
             self.update_project_info()
             self.load_data()
             self.edit_project_button.show()
             self.delete_project_button.show()
-    
+
     def format_currency(self, value):
         try:
             if isinstance(value, str):
@@ -1617,7 +2045,7 @@ class MaterialTable(TableWidget):
                 self.sales_label.setText(f"<b>Sales:</b> {project[2]}")
                 self.worker_label.setText(f"<b>Tukang:</b> {project[3]}")
                 self.date_label.setText(f"<b>Tanggal:</b> {project[4]} - {project[5]}")
-                self.total_label.setText(f"<b>Total:</b> {self.format_currency(self.total_project)}")
+                self.total_label.setText(f"<b>   Total:</b> {self.format_currency(self.total_project)}")
                 self.dp_label.setText(f"<b>DP:</b> {self.format_currency(self.parse_currency(project[7]))}")
                 
                 # Enable rich text interpretation for labels
@@ -1809,3 +2237,42 @@ class DateInputDialog(QDialog):
 
     def get_date(self):
         return self.date_edit.date()
+
+class PhotoViewerDialog(QDialog):
+    def __init__(self, parent=None, photo_path=None):
+        super().__init__(parent)
+        self.setWindowTitle("Lihat Foto")
+        self.photo_path = photo_path
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        
+        photo_label = QLabel(self)
+        if self.photo_path and os.path.exists(self.photo_path):
+            pixmap = QPixmap(self.photo_path)
+            if not pixmap.isNull():
+                photo_label.setPixmap(pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                photo_label.setText("Error loading image")
+        else:
+            photo_label.setText("Image not found or invalid path")
+        layout.addWidget(photo_label)
+        
+        button_layout = QHBoxLayout()
+        
+        close_button = QPushButton("Tutup", self)
+        close_button.clicked.connect(self.close)
+        button_layout.addWidget(close_button)
+        
+        open_file_button = QPushButton("Buka File", self)
+        open_file_button.clicked.connect(self.open_file)
+        button_layout.addWidget(open_file_button)
+        
+        layout.addLayout(button_layout)
+        
+        self.setLayout(layout)
+
+    def open_file(self):
+        if os.path.exists(self.photo_path):
+            os.startfile(self.photo_path)

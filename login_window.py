@@ -28,11 +28,11 @@ class StyleHelper:
         QLineEdit {
             border: none;
             border-bottom: 2px solid #3498db;
-            padding: 5px;
-            margin-bottom: 10px;
+            padding: 8px;
+            margin-bottom: 15px;
             background-color: transparent;
             color: white;
-            font-size: 14px;
+            font-size: 18px;
         }
         QLineEdit:focus {
             border-bottom: 2px solid #2980b9;
@@ -46,9 +46,9 @@ class StyleHelper:
             background-color: #3498db;
             color: white;
             border: none;
-            border-radius: 4px;
-            padding: 10px;
-            font-size: 14px;
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 18px;
             font-weight: bold;
         }
         QPushButton:hover {
@@ -64,7 +64,7 @@ class StyleHelper:
         return """
         QLabel {
             color: #3498db;
-            font-size: 12px;
+            font-size: 16px;
         }
         QLabel:hover {
             color: #2980b9;
@@ -82,12 +82,12 @@ class AuthWidget(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout()
-        layout.setSpacing(15)
+        layout.setSpacing(20)
 
         # Set up title
         title = QLabel("Login" if self.is_login else "Register")
         title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px; color: white;")
+        title.setStyleSheet("font-size: 32px; font-weight: bold; margin-bottom: 30px; color: white;")
         layout.addWidget(title)
 
         # Set up input fields
@@ -166,7 +166,7 @@ class LoginWindow(QWidget):
 
     def init_ui(self):
         self.setWindowTitle('Aplikasi Pembukuan Proyek')
-        self.setFixedSize(400, 600)  # Set a fixed size for the window
+        self.setFixedSize(600, 800)  # Increased window size
         self.setWindowIcon(QIcon('image/icon.png'))
         
         main_layout = QVBoxLayout()
@@ -175,12 +175,12 @@ class LoginWindow(QWidget):
         logo_label = QLabel("Aplikasi Pembukuan Proyek")
         logo_label.setAlignment(Qt.AlignCenter)
         logo_label.setStyleSheet("""
-            font-size: 20px;
+            font-size: 28px;
             font-weight: bold;
-            margin: 20px 0;
+            margin: 30px 0;
             color: white;
-            padding: 10px;
-            border-radius: 5px;
+            padding: 15px;
+            border-radius: 8px;
         """)
         main_layout.addWidget(logo_label)
         
@@ -189,8 +189,8 @@ class LoginWindow(QWidget):
         frame.setStyleSheet("""
             QFrame {
                 background-color: #2c3e50;
-                border-radius: 10px;
-                padding: 20px;
+                border-radius: 15px;
+                padding: 30px;
             }
         """)
         frame_layout = QVBoxLayout(frame)

@@ -1,9 +1,13 @@
 import sqlite3
 from datetime import datetime
 from error_handling import setup_error_handling
+import os
+import shutil
+import uuid
 
 COLUMN_MAPPINGS = {
     'consumers': {
+        'Tanggal': 'date',
         'Nama Konsumen': 'name',
         'Alamat': 'address',
         'Sales': 'sales',
@@ -37,13 +41,68 @@ class DatabaseManager:
         self.conn = sqlite3.connect(db_name)
         self.cursor = self.conn.cursor()
         self.create_tables()
+        self.check_and_update_closed_books()
+        self.check_and_update_closed_books_photo()
         self.migrate_materials_usage_table()
+
+
+    def check_and_update_closed_books_photo(self):
+        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE 'sales_projects_backup_%' OR name LIKE 'worker_projects_backup_%')")
+        closed_books = self.cursor.fetchall()
+
+        for book in closed_books:
+            book_name = book[0]
+            if not self.column_exists(book_name, 'photo_path'):
+                self.cursor.execute(f"ALTER TABLE {book_name} ADD COLUMN photo_path TEXT")
+    
+        self.conn.commit()
+    
+    def check_and_update_closed_books(self):
+        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'consumers_backup_%'")
+        closed_books = self.cursor.fetchall()
+
+        for book in closed_books:
+            book_name = book[0]
+            if not self.column_exists(book_name, 'date'):
+                self.cursor.execute(f"ALTER TABLE {book_name} ADD COLUMN date TEXT DEFAULT ''")
+                temp_table_name = f"{book_name}_temp"
+                self.cursor.execute(f'''
+                CREATE TABLE {temp_table_name} (
+                    id INTEGER PRIMARY KEY,
+                    date TEXT,
+                    name TEXT,
+                    address TEXT,
+                    sales TEXT,
+                    job TEXT,
+                    total_projects TEXT,
+                    worker TEXT,
+                    notes TEXT,
+                    year INTEGER,
+                    month INTEGER,
+                    user_id INTEGER
+                )
+                ''')
+
+                self.cursor.execute(f'''
+                INSERT INTO {temp_table_name} (id, date, name, address, sales, job, total_projects, worker, notes, year, month, user_id)
+                SELECT id, date, name, address, sales, job, total_projects, worker, notes, year, month, user_id FROM {book_name}
+                ''')
+                self.cursor.execute(f"DROP TABLE {book_name}")
+                self.cursor.execute(f"ALTER TABLE {temp_table_name} RENAME TO {book_name}")
+
+        self.conn.commit()
+
+    def column_exists(self, table_name, column_name):
+        self.cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = [column[1] for column in self.cursor.fetchall()]
+        return column_name in columns
 
     def create_tables(self):
         # Consumers table
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS consumers (
             id INTEGER PRIMARY KEY,
+            date TEXT,
             name TEXT,
             address TEXT,
             sales TEXT,
@@ -81,6 +140,7 @@ class DatabaseManager:
             year INTEGER,
             month INTEGER,
             user_id INTEGER,
+            photo_path TEXT,
             FOREIGN KEY (sales_id) REFERENCES sales (id)
         )
         ''')
@@ -108,6 +168,7 @@ class DatabaseManager:
             year INTEGER,
             month INTEGER,
             user_id INTEGER,
+            photo_path TEXT,
             FOREIGN KEY (tukang_id) REFERENCES tukang (id)
         )
         ''')
@@ -143,29 +204,66 @@ class DatabaseManager:
         )
         ''')
 
-        self.conn.commit()
+        if not self.column_exists('sales_projects', 'photo_path'):
+           self.cursor.execute("ALTER TABLE sales_projects ADD COLUMN photo_path TEXT")
+        
+        if not self.column_exists('worker_projects', 'photo_path'):
+              self.cursor.execute("ALTER TABLE worker_projects ADD COLUMN photo_path TEXT")
+        
+        # Periksa apakah kolom 'date' sudah ada
+        if not self.column_exists('consumers', 'date'):
+        # Tambahkan kolom 'date' tepat setelah kolom 'id'
+            self.cursor.execute("ALTER TABLE consumers ADD COLUMN date TEXT DEFAULT ''")
+            self.cursor.execute("UPDATE consumers SET date = (SELECT date FROM consumers AS temp WHERE temp.id = consumers.id) WHERE EXISTS (SELECT 1 FROM consumers AS temp WHERE temp.id = consumers.id)")
+        
+        # Buat tabel sementara dengan urutan kolom yang benar
+            self.cursor.execute('''
+            CREATE TABLE consumers_temp (
+                id INTEGER PRIMARY KEY,
+                date TEXT,
+                name TEXT,
+                address TEXT,
+                sales TEXT,
+                job TEXT,
+                total_projects TEXT,
+                worker TEXT,
+                notes TEXT,
+                year INTEGER,
+                month INTEGER,
+                user_id INTEGER
+            )
+            ''')
+
+            self.cursor.execute('''
+            INSERT INTO consumers_temp (id, date, name, address, sales, job, total_projects, worker, notes, year, month, user_id)
+            SELECT id, date, name, address, sales, job, total_projects, worker, notes, year, month, user_id FROM consumers
+            ''')
+        
+            self.cursor.execute("DROP TABLE consumers")
+
+            self.cursor.execute("ALTER TABLE consumers_temp RENAME TO consumers")
+
+            self.conn.commit()
     
     def migrate_materials_usage_table(self):
-        # Check if unit_price column exists
         self.cursor.execute("PRAGMA table_info(materials_usage)")
         columns = [column[1] for column in self.cursor.fetchall()]
         
         if 'unit_price' not in columns:
-            # Add unit_price column
             self.cursor.execute("ALTER TABLE materials_usage ADD COLUMN unit_price TEXT")
-            
-            # Update existing rows: set unit_price based on total and quantity
+
             self.cursor.execute("UPDATE materials_usage SET unit_price = CAST(total AS REAL) / CAST(quantity AS REAL) WHERE quantity != '0' AND quantity != ''")
             
             self.conn.commit()
 
     def insert_consumer(self, data, year, month, user_id):
         self.cursor.execute('''
-        INSERT INTO consumers (name, address, sales, job, total_projects, worker, notes, year, month, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO consumers (date, name, address, sales, job, total_projects, worker, notes, year, month, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (*data, year, month, user_id))
         self.conn.commit()
         return self.cursor.lastrowid
+
 
     def insert_project(self, data, user_id):
         self.cursor.execute('''
@@ -224,36 +322,38 @@ class DatabaseManager:
         current_date = datetime.now()
         year, month, day = current_date.year, current_date.month, current_date.day
     
-        # Inisialisasi counter
         counter = 1
-    
         while True:
-            # Buat nama tabel backup
             backup_table_name = f"{table_name}_backup_{person_id}_{user_id}_{year}_{month}_{day}_{counter}"
-        
-            # Cek apakah tabel dengan nama ini sudah ada
             self.cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name=?", (backup_table_name,))
             if not self.cursor.fetchone():
-                # Jika tidak ada, gunakan nama ini
                 break
-        
-            # Jika sudah ada, increment counter dan coba lagi
             counter += 1
-    
+
         # Buat backup tabel
         if table_name == 'sales_projects':
             self.cursor.execute(f"CREATE TABLE {backup_table_name} AS SELECT * FROM {table_name} WHERE sales_id = ? AND user_id = ?", (person_id, user_id))
         elif table_name == 'worker_projects':
             self.cursor.execute(f"CREATE TABLE {backup_table_name} AS SELECT * FROM {table_name} WHERE tukang_id = ? AND user_id = ?", (person_id, user_id))
-    
+
+        # Rename foto folder
+        old_folder = f"foto/{user_id}/sales_projects/{person_id}"
+        new_folder = f"foto/{user_id}/sales_projects/{backup_table_name}"
+        if os.path.exists(old_folder):
+            os.rename(old_folder, new_folder)
+
+        # Update photo_path in backup table
+        self.cursor.execute(f"UPDATE {backup_table_name} SET photo_path = REPLACE(photo_path, ?, ?)", (old_folder, new_folder))
+
         # Clear data for this person from the original table
         if table_name == 'sales_projects':
             self.cursor.execute(f"DELETE FROM {table_name} WHERE sales_id = ? AND user_id = ?", (person_id, user_id))
         elif table_name == 'worker_projects':
             self.cursor.execute(f"DELETE FROM {table_name} WHERE tukang_id = ? AND user_id = ?", (person_id, user_id))
-        
+    
         self.conn.commit()
         return backup_table_name
+
 
     def get_closed_books_for_person(self, table_name, person_id, user_id):
         self.cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '{table_name}_backup_{person_id}_{user_id}_%'")
@@ -287,12 +387,11 @@ class DatabaseManager:
         self.cursor.execute(f"SELECT * FROM {backup_table_name}")
         return self.cursor.fetchall()
     
-    def add_to_closed_book(self, backup_table_name, data):
+    def add_to_closed_book(self, backup_table_name, data, photo_path=None, user_id=None, person_id=None):
         table_name = backup_table_name.split('_backup_')[0]
         mapping = COLUMN_MAPPINGS.get(table_name, {})
         mapped_data = {mapping.get(k, k): v for k, v in data.items()}
 
-        # Generate a new ID
         new_id = self.get_next_id(backup_table_name)
         mapped_data['id'] = new_id
 
@@ -303,10 +402,12 @@ class DatabaseManager:
         placeholders = ', '.join(['?' for _ in filtered_data])
         query = f'INSERT INTO "{backup_table_name}" ({columns}) VALUES ({placeholders})'
 
-        print(f"Query: {query}")
-        print(f"Values: {tuple(filtered_data.values())}")
-
         self.cursor.execute(query, tuple(filtered_data.values()))
+
+        if photo_path:
+            new_photo_path = self.save_project_photo(user_id, person_id, mapped_data['customer_name'], photo_path, is_tukang='worker' in table_name, is_history=True, backup_table_name=backup_table_name)
+            self.cursor.execute(f'UPDATE "{backup_table_name}" SET photo_path = ? WHERE id = ?', (new_photo_path, new_id))
+
         self.conn.commit()
         return new_id
 
@@ -315,25 +416,24 @@ class DatabaseManager:
         max_id = self.cursor.fetchone()[0]
         return (max_id or 0) + 1
 
-    def update_in_closed_book(self, backup_table_name, record_id, data):
+    def update_in_closed_book(self, backup_table_name, record_id, data, photo_path=None, user_id=None, person_id=None):
         table_name = backup_table_name.split('_backup_')[0]
         mapping = COLUMN_MAPPINGS.get(table_name, {})
         mapped_data = {mapping.get(k, k): v for k, v in data.items()}
-    
+
         actual_columns = self.get_table_columns(backup_table_name)
-    
-        set_clause = ', '.join([f'"{col}" = ?' for col in actual_columns if col in mapped_data and col != 'id'])
-        if not set_clause:
-            print("No valid columns to update")
-            return
-    
+        filtered_data = {k: v for k, v in mapped_data.items() if k in actual_columns and k != 'id'}
+
+        set_clause = ', '.join([f'"{col}" = ?' for col in filtered_data.keys()])
         query = f'UPDATE "{backup_table_name}" SET {set_clause} WHERE id = ?'
-        values = [mapped_data[col] for col in actual_columns if col in mapped_data and col != 'id'] + [record_id]
-    
-        print(f"Query: {query}")
-        print(f"Values: {values}")
-    
+        values = list(filtered_data.values()) + [record_id]
+
         self.cursor.execute(query, values)
+
+        if photo_path:
+            new_photo_path = self.save_project_photo(user_id, person_id, mapped_data['customer_name'], photo_path, is_tukang='worker' in table_name, is_history=True, backup_table_name=backup_table_name)
+            self.cursor.execute(f'UPDATE "{backup_table_name}" SET photo_path = ? WHERE id = ?', (new_photo_path, record_id))
+
         self.conn.commit()
 
     def delete_from_closed_book(self, backup_table_name, record_id):
@@ -344,24 +444,50 @@ class DatabaseManager:
     def update_consumer(self, consumer_id, data, user_id):
         self.cursor.execute('''
         UPDATE consumers
-        SET name=?, address=?, sales=?, job=?, total_projects=?, worker=?, notes=?
+        SET date=?, name=?, address=?, sales=?, job=?, total_projects=?, worker=?, notes=?
         WHERE id=? AND user_id=?
         ''', (*data, consumer_id, user_id))
         self.conn.commit()
 
-    def update_sales_project(self, project_id, data, user_id):
+
+    def update_sales_project(self, project_id, data, user_id, photo_path=None):
         self.cursor.execute('''
         UPDATE sales_projects
         SET customer_name=?, address=?, job=?, total_project=?, commission=?, kb=?, notes=?
         WHERE id=? AND user_id=?
         ''', (*data, project_id, user_id))
+
+        if photo_path:
+            # Get the current photo path
+            self.cursor.execute('SELECT photo_path FROM sales_projects WHERE id = ?', (project_id,))
+            current_photo_path = self.cursor.fetchone()[0]
+
+            # Delete the old photo if it exists
+            if current_photo_path and os.path.exists(current_photo_path):
+                os.remove(current_photo_path)
+
+            # Save the new photo
+            sales_project = self.cursor.execute('SELECT sales_id FROM sales_projects WHERE id = ?', (project_id,)).fetchone()
+            if sales_project:
+                sales_id = sales_project[0]
+                new_photo_path = self.save_project_photo(user_id, sales_id, data[0], photo_path)
+                self.cursor.execute('''
+                UPDATE sales_projects SET photo_path = ? WHERE
+                 id = ?
+                ''', (new_photo_path, project_id))
+
         self.conn.commit()
 
-    def update_worker_project(self, project_id, data, user_id):
+    def update_worker_project(self, project_id, data, user_id, photo_path=None):
         self.cursor.execute('''
         UPDATE worker_projects SET customer_name=?, address=?, job=?, size=?, kb=?, notes=?
         WHERE id=? AND user_id=?
         ''', (*data, project_id, user_id))
+        if photo_path:
+            new_photo_path = self.save_project_photo(user_id, data[0], data[1], photo_path, is_tukang=True)
+            self.cursor.execute('''
+            UPDATE worker_projects SET photo_path = ? WHERE id = ?
+            ''', (new_photo_path, project_id))
         self.conn.commit()
 
     def update_material_usage(self, material_id, data, user_id):
@@ -410,14 +536,27 @@ class DatabaseManager:
         self.cursor.execute('DELETE FROM worker_projects WHERE tukang_id = ? AND user_id = ?', (tukang_id, user_id))
         self.cursor.execute('DELETE FROM tukang WHERE id = ? AND user_id = ?', (tukang_id, user_id))
         self.conn.commit()
+    
+    def get_worker_project_photo(self, project_id, user_id):
+        self.cursor.execute('''
+        SELECT photo_path FROM worker_projects WHERE id = ? AND user_id = ?
+        ''', (project_id, user_id))
+        result = self.cursor.fetchone()
+        return result[0] if result else None
 
-    def insert_worker_project(self, tukang_id, data, year, month, user_id):
+    def insert_worker_project(self, tukang_id, data, year, month, user_id, photo_path=None):
         self.cursor.execute('''
         INSERT INTO worker_projects (tukang_id, customer_name, address, job, size, kb, notes, year, month, user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (tukang_id, *data, year, month, user_id))
+        new_id = self.cursor.lastrowid
+        if photo_path:
+            new_photo_path = self.save_project_photo(user_id, tukang_id, data[0], photo_path, is_tukang=True)
+            self.cursor.execute('''
+            UPDATE worker_projects SET photo_path = ? WHERE id = ?
+            ''', (new_photo_path, new_id))
         self.conn.commit()
-        return self.cursor.lastrowid
+        return new_id
 
     def migrate_sales_table(self):
         # Check if the sales_id column exists in sales_projects
@@ -482,13 +621,42 @@ class DatabaseManager:
         ''', (sales_id, user_id))
         return self.cursor.fetchall()
 
-    def insert_sales_project(self, sales_id, data, year, month, user_id):
+    def insert_sales_project(self, sales_id, data, year, month, user_id, photo_path=None):
         self.cursor.execute('''
         INSERT INTO sales_projects (sales_id, customer_name, address, job, total_project, commission, kb, notes, year, month, user_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (sales_id, *data, year, month, user_id))
+        new_id = self.cursor.lastrowid
+    
+        if photo_path:
+            new_photo_path = self.save_project_photo(user_id, sales_id, data[0], photo_path)
+            self.cursor.execute('''
+            UPDATE sales_projects SET photo_path = ? WHERE id = ?
+            ''', (new_photo_path, new_id))
+    
         self.conn.commit()
-        return self.cursor.lastrowid
+        return new_id
+
+    
+    def save_project_photo(self, user_id, person_id, customer_name, photo_path, is_tukang=False, is_history=False, backup_table_name=None):
+        if is_history:
+            directory = f"foto/{user_id}/{backup_table_name}/{person_id}"
+        else:
+            directory = f"foto/{user_id}/{'worker_projects' if is_tukang else 'sales_projects'}/{person_id}"
+        os.makedirs(directory, exist_ok=True)
+        file_extension = os.path.splitext(photo_path)[1]
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        new_photo_path = os.path.join(directory, unique_filename)
+        shutil.copy(photo_path, new_photo_path)
+        return new_photo_path
+
+
+    def get_sales_project_photo(self, project_id, user_id):
+        self.cursor.execute('''
+        SELECT photo_path FROM sales_projects WHERE id = ? AND user_id = ?
+        ''', (project_id, user_id))
+        result = self.cursor.fetchone()
+        return result[0] if result else None
 
     def __del__(self):
         self.conn.close()

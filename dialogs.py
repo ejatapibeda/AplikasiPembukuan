@@ -1,5 +1,5 @@
 import webbrowser
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout, QComboBox, QDateEdit, QProgressBar, QDialogButtonBox, QMessageBox
+from PyQt5.QtWidgets import QDialog, QFileDialog, QVBoxLayout, QLabel, QTextEdit, QLineEdit, QPushButton, QFormLayout, QComboBox, QDateEdit, QProgressBar, QDialogButtonBox, QMessageBox
 from PyQt5.QtCore import QThread, pyqtSignal, QDate, QUrl
 from PyQt5.QtGui import QDesktopServices, QDoubleValidator
 
@@ -49,49 +49,73 @@ class AddDialog(QDialog):
                 data.append(input_field.date().toString("dd/MM/yyyy"))
         return data
 
-class AddConsumerDialog(AddDialog):
+class AddConsumerDialog(QDialog):
     def __init__(self, parent=None, initial_data=None):
         super().__init__(parent)
-        setup_error_handling()
         self.setWindowTitle("Tambah/Edit Konsumen")
+        self.setup_ui()
         if initial_data:
             self.load_data(initial_data)
 
     def setup_ui(self):
-        self.name_input = QLineEdit()
-        self.address_input = QLineEdit()
-        self.sales_input = QLineEdit()
-        self.job_input = QLineEdit()
-        self.total_projects_input = QLineEdit()
-        self.worker_input = QLineEdit()
-        self.notes_input = QLineEdit()
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
 
-        self.form_layout.addRow("Nama Konsumen:", self.name_input)
-        self.form_layout.addRow("Alamat:", self.address_input)
-        self.form_layout.addRow("Sales:", self.sales_input)
-        self.form_layout.addRow("Pekerjaan:", self.job_input)
-        self.form_layout.addRow("Total Proyek:", self.total_projects_input)
-        self.form_layout.addRow("Tukang:", self.worker_input)
-        self.form_layout.addRow("Keterangan:", self.notes_input)
+        self.date_edit = QDateEdit(QDate.currentDate())
+        self.date_edit.setCalendarPopup(True)
+        form_layout.addRow("Tanggal:", self.date_edit)
 
-        self.inputs = [
-            self.name_input,
-            self.address_input,
-            self.sales_input,
-            self.job_input,
-            self.total_projects_input,
-            self.worker_input,
-            self.notes_input
+        self.name_input = QLineEdit(self)
+        form_layout.addRow("Nama Konsumen:", self.name_input)
+
+        self.address_input = QLineEdit(self)
+        form_layout.addRow("Alamat:", self.address_input)
+
+        self.sales_input = QLineEdit(self)
+        form_layout.addRow("Sales:", self.sales_input)
+
+        self.job_input = QLineEdit(self)
+        form_layout.addRow("Pekerjaan:", self.job_input)
+
+        self.total_projects_input = QLineEdit(self)
+        form_layout.addRow("Total Proyek:", self.total_projects_input)
+
+        self.worker_input = QLineEdit(self)
+        form_layout.addRow("Tukang:", self.worker_input)
+
+        self.notes_input = QTextEdit(self)
+        self.notes_input.setMinimumHeight(100)
+        form_layout.addRow("Keterangan:", self.notes_input)
+
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def get_data(self):
+        return [
+            self.date_edit.date().toString("dd/MM/yyyy"),
+            self.name_input.text(),
+            self.address_input.text(),
+            self.sales_input.text(),
+            self.job_input.text(),
+            self.total_projects_input.text(),
+            self.worker_input.text(),
+            self.notes_input.toPlainText()
         ]
 
     def load_data(self, data):
-        self.name_input.setText(str(data[0]))
-        self.address_input.setText(str(data[1]))
-        self.sales_input.setText(str(data[2]))
-        self.job_input.setText(str(data[3]))
-        self.total_projects_input.setText(str(data[4]))
-        self.worker_input.setText(str(data[5]))
-        self.notes_input.setText(str(data[6]))
+        print(data[5])
+        self.date_edit.setDate(QDate.fromString(data[0], "dd/MM/yyyy"))
+        self.name_input.setText(data[1])
+        self.address_input.setText(data[2])
+        self.sales_input.setText(data[3])
+        self.job_input.setText(data[4])
+        self.total_projects_input.setText(data[5])
+        self.worker_input.setText(data[6])
+        self.notes_input.setPlainText(data[7])
 
 class ProjectInputDialog(QDialog):
     def __init__(self, parent=None, initial_data=None):
@@ -262,6 +286,8 @@ class AddMaterialDialog(QDialog):
         self.form_layout.addRow("Quantity:", self.quantity_input)
         self.form_layout.addRow("Harga Satuan:", self.unit_price_input)
         self.form_layout.addRow("Total:", self.total_label)
+        self.notes_input = QTextEdit()
+        self.notes_input.setMinimumHeight(100)
         self.form_layout.addRow("Keterangan:", self.notes_input)
 
         self.layout.addLayout(self.form_layout)
@@ -300,7 +326,7 @@ class AddMaterialDialog(QDialog):
             self.quantity_input.text(),
             self.unit_price_input.text(),
             self.total_label.text(),
-            self.notes_input.text()
+            self.notes_input.toPlainText()
         ]
 
     def load_data(self, data):
@@ -309,7 +335,7 @@ class AddMaterialDialog(QDialog):
         self.quantity_input.setText(data[2])
         self.unit_price_input.setText(data[3])
         self.total_label.setText(data[4])
-        self.notes_input.setText(data[5])
+        self.notes_input.setPlainText(data[5])
         self.update_total()
 
 class RedirectHandler(BaseHTTPRequestHandler):
@@ -489,6 +515,7 @@ class AddSalesProjectDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Tambah/Edit Proyek Sales")
+        self.photo_path = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -513,8 +540,13 @@ class AddSalesProjectDialog(QDialog):
         self.kb_edit = QLineEdit(self)
         form_layout.addRow("KB:", self.kb_edit)
 
-        self.notes_edit = QLineEdit(self)
+        self.notes_edit = QTextEdit(self)
+        self.notes_edit.setMinimumHeight(100)
         form_layout.addRow("Keterangan:", self.notes_edit)
+
+        self.photo_button = QPushButton("Pilih Foto", self)
+        self.photo_button.clicked.connect(self.choose_photo)
+        form_layout.addRow("Foto:", self.photo_button)
 
         layout.addLayout(form_layout)
 
@@ -522,6 +554,15 @@ class AddSalesProjectDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
+
+    def choose_photo(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "Pilih Foto", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+        if file_name:
+            self.photo_path = file_name
+            self.photo_button.setText(os.path.basename(file_name))
+
+    def get_photo_path(self):
+        return self.photo_path
 
     def get_data(self):
         return (
@@ -531,7 +572,7 @@ class AddSalesProjectDialog(QDialog):
             self.total_project_edit.text(),
             self.commission_edit.text(),
             self.kb_edit.text(),
-            self.notes_edit.text()
+            self.notes_edit.toPlainText(),
         )
     
     def validate_data(self):
@@ -550,12 +591,13 @@ class AddSalesProjectDialog(QDialog):
         self.total_project_edit.setText(str(data[3]))
         self.commission_edit.setText(str(data[4]))
         self.kb_edit.setText(str(data[5]))
-        self.notes_edit.setText(str(data[6]))
+        self.notes_edit.setPlainText(str(data[6]))
 
 class AddTukangProjectDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Tambah/Edit Proyek Tukang")
+        self.photo_path = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -577,8 +619,13 @@ class AddTukangProjectDialog(QDialog):
         self.kb_edit = QLineEdit(self)
         form_layout.addRow("KB:", self.kb_edit)
 
-        self.notes_edit = QLineEdit(self)
+        self.notes_edit = QTextEdit(self)
+        self.notes_edit.setMinimumHeight(100) 
         form_layout.addRow("Keterangan:", self.notes_edit)
+
+        self.photo_button = QPushButton("Pilih Foto", self)
+        self.photo_button.clicked.connect(self.choose_photo)
+        form_layout.addRow("Foto:", self.photo_button)
 
         layout.addLayout(form_layout)
 
@@ -586,6 +633,15 @@ class AddTukangProjectDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
+    
+    def choose_photo(self):
+        file_name, _ = QFileDialog.getOpenFileName(self, "Pilih Foto", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+        if file_name:
+            self.photo_path = file_name
+            self.photo_button.setText(os.path.basename(file_name))
+
+    def get_photo_path(self):
+        return self.photo_path
 
     def get_data(self):
         return (
@@ -594,7 +650,7 @@ class AddTukangProjectDialog(QDialog):
             self.job_edit.text(),
             self.size_edit.text(),
             self.kb_edit.text(),
-            self.notes_edit.text()
+            self.notes_edit.toPlainText()
         )
 
     def load_data(self, data):
@@ -603,4 +659,4 @@ class AddTukangProjectDialog(QDialog):
         self.job_edit.setText(str(data[2]))
         self.size_edit.setText(str(data[3]))
         self.kb_edit.setText(str(data[4]))
-        self.notes_edit.setText(str(data[5]))
+        self.notes_edit.setPlainText(str(data[5]))
