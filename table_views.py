@@ -778,7 +778,7 @@ class SalesTable(TableWidget):
             self.view_photo_button.hide()
 
 
-    def create_new_sales(self, menu):
+    def create_new_sales(self):
         sales_name, ok = QInputDialog.getText(self, "Sales Baru", "Nama Sales:")
         if ok and sales_name:
             self.current_sales_id = self.db.insert_sales(sales_name, self.user_id)
@@ -786,7 +786,6 @@ class SalesTable(TableWidget):
             self.update_sales_info()
             self.load_data()
             QMessageBox.information(self, "Sukses", f"Sales '{sales_name}' berhasil dibuat dan dipilih.")
-            menu.close()
 
     def select_sales(self):
         sales_list = self.db.get_sales_list(self.user_id)
