@@ -703,6 +703,9 @@ class SalesTable(TableWidget):
         self.layout.addWidget(self.total_kb_label)
 
     def setup_sales_buttons(self):
+        self.new_sales_button = QPushButton("Sales Baru")
+        self.new_sales_button.clicked.connect(self.create_new_sales)
+        self.button_layout.addWidget(self.new_sales_button)
 
         self.select_sales_button = QPushButton("Pilih Sales")
         self.select_sales_button.clicked.connect(self.select_sales)
@@ -718,10 +721,6 @@ class SalesTable(TableWidget):
         menu.setWindowTitle("Setting Sales")
         menu.setMinimumWidth(400)
         layout = QVBoxLayout(menu)
-
-        new_sales_button = QPushButton("Sales Baru")
-        new_sales_button.clicked.connect(lambda: self.create_new_sales(menu))
-        layout.addWidget(new_sales_button)
 
         edit_sales_button = QPushButton("Edit Sales")
         edit_sales_button.clicked.connect(lambda: self.edit_sales(menu))
@@ -1291,6 +1290,10 @@ class TukangTable(TableWidget):
         self.table.hideColumn(0)  # Hide ID column
     
     def setup_setting_button(self):
+        self.new_tukang_button = QPushButton("Tukang Baru")
+        self.new_tukang_button.clicked.connect(self.create_new_tukang)
+        self.button_layout.addWidget(self.new_tukang_button)
+
         self.select_tukang_button = QPushButton("Pilih Tukang")
         self.select_tukang_button.clicked.connect(self.select_tukang)
         self.button_layout.addWidget(self.select_tukang_button)
@@ -1305,10 +1308,6 @@ class TukangTable(TableWidget):
         menu.setWindowTitle("Setting Tukang")
         menu.setMinimumWidth(400)
         layout = QVBoxLayout(menu)
-
-        new_tukang_button = QPushButton("Tukang Baru")
-        new_tukang_button.clicked.connect(lambda: self.create_new_tukang(menu))
-        layout.addWidget(new_tukang_button)
 
         edit_tukang_button = QPushButton("Edit Tukang")
         edit_tukang_button.clicked.connect(lambda: self.edit_tukang(menu))
@@ -2239,25 +2238,22 @@ class DateInputDialog(QDialog):
         return self.date_edit.date()
 
 class PhotoViewerDialog(QDialog):
-    def __init__(self, parent=None, photo_path=None):
+    def __init__(self, parent=None, photo_path=None, db_manager=None, project_id=None, user_id=None, is_sales_project=True):
         super().__init__(parent)
         self.setWindowTitle("Lihat Foto")
         self.photo_path = photo_path
+        self.db = DatabaseManager()
+        self.project_id = project_id
+        self.user_id = user_id
+        self.is_sales_project = is_sales_project
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
-        photo_label = QLabel(self)
-        if self.photo_path and os.path.exists(self.photo_path):
-            pixmap = QPixmap(self.photo_path)
-            if not pixmap.isNull():
-                photo_label.setPixmap(pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            else:
-                photo_label.setText("Error loading image")
-        else:
-            photo_label.setText("Image not found or invalid path")
-        layout.addWidget(photo_label)
+        self.photo_label = QLabel(self)
+        self.update_photo()
+        layout.addWidget(self.photo_label)
         
         button_layout = QHBoxLayout()
         
@@ -2269,10 +2265,42 @@ class PhotoViewerDialog(QDialog):
         open_file_button.clicked.connect(self.open_file)
         button_layout.addWidget(open_file_button)
         
+        delete_button = QPushButton("Hapus Foto", self)
+        delete_button.clicked.connect(self.delete_photo)
+        button_layout.addWidget(delete_button)
+        
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
 
+    def update_photo(self):
+        if self.photo_path and os.path.exists(self.photo_path):
+            pixmap = QPixmap(self.photo_path)
+            if not pixmap.isNull():
+                self.photo_label.setPixmap(pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                self.photo_label.setText("Error loading image")
+        else:
+            self.photo_label.setText("Image not found or invalid path")
+
     def open_file(self):
         if os.path.exists(self.photo_path):
             os.startfile(self.photo_path)
+
+    def delete_photo(self):
+        reply = QMessageBox.question(self, 'Konfirmasi Hapus', 'Anda yakin ingin menghapus foto ini?',
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            if os.path.exists(self.photo_path):
+                os.remove(self.photo_path)
+            
+            # Update database
+            if self.is_sales_project:
+                self.db.update_sales_project_photo(self.project_id, None, self.user_id)
+            else:
+                self.db.update_worker_project_photo(self.project_id, None, self.user_id)
+            
+            self.photo_path = None
+            self.update_photo()
+            QMessageBox.information(self, "Sukses", "Foto berhasil dihapus.")
+            self.close()
