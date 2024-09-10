@@ -505,6 +505,18 @@ class DatabaseManager:
         WHERE id=? AND user_id=?
         ''', (*data, user_id))
         self.conn.commit()
+    
+    def update_sales_project_photo(self, project_id, photo_path, user_id):
+       self.cursor.execute('''
+       UPDATE sales_projects SET photo_path = ? WHERE id = ? AND user_id = ?
+       ''', (photo_path, project_id, user_id))
+       self.conn.commit()
+
+    def update_worker_project_photo(self, project_id, photo_path, user_id):
+       self.cursor.execute('''
+       UPDATE worker_projects SET photo_path = ? WHERE id = ? AND user_id = ?
+       ''', (photo_path, project_id, user_id))
+       self.conn.commit()
 
     def delete_project(self, project_id, user_id):
         self.cursor.execute("DELETE FROM materials_usage WHERE project_id=? AND user_id=?", (project_id, user_id))
