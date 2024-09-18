@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QFrame , QMenu, QDialogButtonBox, QVBoxLayout, QLabel, QTableWidget, QTextEdit, QTableWidgetItem, QHeaderView, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QMessageBox, QInputDialog, QDateEdit, QSpacerItem, QDialog, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QFrame , QComboBox, QDialogButtonBox, QVBoxLayout, QLabel, QTableWidget, QTextEdit, QTableWidgetItem, QHeaderView, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QMessageBox, QInputDialog, QDateEdit, QSpacerItem, QDialog, QSizePolicy, QListWidgetItem, QListWidget
 from PyQt5.QtGui import QFont, QPixmap, QColor, QCursor
 from PyQt5.QtCore import Qt, QDate
 import openpyxl
@@ -60,7 +60,7 @@ class TableWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        #self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.layout.addWidget(self.table)
 
         self.setup_buttons()
@@ -129,14 +129,13 @@ class TableWidget(QWidget):
         self.export_button.clicked.connect(self.export_to_excel)
         self.button_layout.addWidget(self.export_button)
 
-        if not isinstance(self, MaterialTable):
-            self.view_history_button = QPushButton("Lihat Riwayat")
-            self.view_history_button.clicked.connect(self.view_history)
-            self.button_layout.addWidget(self.view_history_button)
+        self.view_history_button = QPushButton("Lihat Riwayat")
+        self.view_history_button.clicked.connect(self.view_history)
+        self.button_layout.addWidget(self.view_history_button)
             
-            self.close_book_button = QPushButton("Tutup Buku")
-            self.close_book_button.clicked.connect(self.close_book)
-            self.button_layout.addWidget(self.close_book_button)
+        self.close_book_button = QPushButton("Tutup Buku")
+        self.close_book_button.clicked.connect(self.close_book)
+        self.button_layout.addWidget(self.close_book_button)
 
         self.layout.addLayout(self.button_layout)
 
@@ -405,10 +404,24 @@ class ConsumerTable(TableWidget):
         setup_error_handling()
         self.title_label.setText("Daftar Konsumen")
         self.setup_table()
+    
+    def set_column_widths(self):
+        # Sesuaikan lebar kolom berdasarkan kebutuhan Anda
+        self.table.setColumnWidth(0, 100)  # Tanggal
+        self.table.setColumnWidth(1, 200)  # Nama Konsumen
+        self.table.setColumnWidth(2, 300)  # Alamat
+        self.table.setColumnWidth(3, 125)  # Sales
+        self.table.setColumnWidth(4, 150)  # Pekerjaan
+        self.table.setColumnWidth(5, 200)  # Total Proyek
+        self.table.setColumnWidth(6, 125)  # Tukang
+        self.table.setColumnWidth(7, 200)  # Keterangan
+        self.table.horizontalHeader().setStretchLastSection(True)
+
 
     def setup_table(self):
         self.table.setColumnCount(len(COLUMN_MAPPINGS[self.table_name]))
         self.table.setHorizontalHeaderLabels(list(COLUMN_MAPPINGS[self.table_name].keys()))
+        self.set_column_widths()  # Tambahkan baris ini
 
     def load_data(self):
         self.table.setRowCount(0)  # Clear existing data
@@ -676,7 +689,17 @@ class SalesTable(TableWidget):
         self.setup_sales_buttons()
         self.setup_total_commission_label()
         self.setup_view_photo_button()
+        self.set_column_widths()  # Call the method here
 
+    def set_column_widths(self):
+        self.table.setColumnWidth(1, 200)  # Nama Konsumen
+        self.table.setColumnWidth(2, 300)  # Alamat
+        self.table.setColumnWidth(3, 175)  # Pekerjaan
+        self.table.setColumnWidth(4, 175)  # Total Proyek
+        self.table.setColumnWidth(5, 175)  # Komisi
+        self.table.setColumnWidth(6, 175)  # KB
+        self.table.setColumnWidth(7, 200)  # Keterangan
+        self.table.horizontalHeader().setStretchLastSection(True)
 
     def set_user_id(self, user_id):
         super().set_user_id(user_id)
@@ -690,6 +713,7 @@ class SalesTable(TableWidget):
         self.table.setHorizontalHeaderLabels(column_names)
         self.table.hideColumn(0)  # Hide ID column
         self.table.itemSelectionChanged.connect(self.on_selection_changed)
+        self.table.setColumnWidth(self.kb_column_index, 150)
     
     def setup_total_commission_label(self):
         self.total_commission_label = QLabel("Total Komisi: Rp 0")
@@ -1282,6 +1306,16 @@ class TukangTable(TableWidget):
         self.current_tukang_name = ""
         self.size_column_index = 4
         self.kb_column_index = 5
+        self.set_column_widths()  # Call the method here
+
+    def set_column_widths(self):
+        self.table.setColumnWidth(1, 250)  # Nama Konsumen
+        self.table.setColumnWidth(2, 300)  # Alamat
+        self.table.setColumnWidth(3, 200)  # Pekerjaan
+        self.table.setColumnWidth(4, 200)  # Ukuran
+        self.table.setColumnWidth(5, 250)  # KB
+        self.table.setColumnWidth(6, 200)  # Keterangan
+        self.table.horizontalHeader().setStretchLastSection(True)
 
     def setup_table(self):
         self.table.setColumnCount(len(COLUMN_MAPPINGS[self.table_name]) + 1)  # +1 for ID column
@@ -1757,6 +1791,19 @@ class MaterialTable(TableWidget):
         self.current_project_id = None
         self.current_project_name = ""
         self.total_project = 0
+        self.is_viewing_history = False
+        self.current_book_name = None
+        self.select_history_project_button = None
+        self.set_column_widths()  # Call the method here
+
+    def set_column_widths(self):
+        self.table.setColumnWidth(0, 200)  # Tanggal
+        self.table.setColumnWidth(1, 250)  # Nama Barang
+        self.table.setColumnWidth(2, 150)  # Quantity
+        self.table.setColumnWidth(3, 250)  # Harga Satuan
+        self.table.setColumnWidth(4, 250)  # Total
+        self.table.setColumnWidth(5, 200)  # Keterangan
+        self.table.horizontalHeader().setStretchLastSection(True)
 
     def setup_project_info_display(self):
         self.project_info_widget = QWidget()
@@ -2031,29 +2078,28 @@ class MaterialTable(TableWidget):
             else:
                 QMessageBox.information(self, "Cancelled", "Penghapusan proyek dibatalkan.")
 
-    def update_project_info(self):
-        if self.current_project_id:
+    def update_project_info(self, project=None):
+        if project is None and self.current_project_id:
             projects = self.db.get_projects(self.user_id)
             project = next((p for p in projects if p[0] == self.current_project_id), None)
-            if project:
-                self.current_project_name = project[1]
-                self.total_project = self.parse_currency(project[6])
-                
-                self.project_name_label.setText(f"Proyek: {self.current_project_name}")
-                self.sales_label.setText(f"<b>Sales:</b> {project[2]}")
-                self.worker_label.setText(f"<b>Tukang:</b> {project[3]}")
-                self.date_label.setText(f"<b>Tanggal:</b> {project[4]} - {project[5]}")
-                self.total_label.setText(f"<b>   Total:</b> {self.format_currency(self.total_project)}")
-                self.dp_label.setText(f"<b>DP:</b> {self.format_currency(self.parse_currency(project[7]))}")
-                
-                # Enable rich text interpretation for labels
-                for label in [self.sales_label, self.worker_label, self.date_label, self.total_label, self.dp_label]:
-                    label.setTextFormat(Qt.RichText)
-            else:
-                self.reset_project_info()
+
+        if project:
+            self.current_project_name = project[1]
+            self.total_project = self.parse_currency(project[6])
+        
+            self.project_name_label.setText(f"Proyek: {self.current_project_name}")
+            self.sales_label.setText(f"<b>Sales:</b> {project[2]}")
+            self.worker_label.setText(f"<b>Tukang:</b> {project[3]}")
+            self.date_label.setText(f"<b>Tanggal:</b> {project[4]} - {project[5]}")
+            self.total_label.setText(f"<b>Total:</b> {self.format_currency(self.total_project)}")
+            self.dp_label.setText(f"<b>DP:</b> {self.format_currency(self.parse_currency(project[7]))}")
+
+            # Enable rich text interpretation for labels
+            for label in [self.sales_label, self.worker_label, self.date_label, self.total_label, self.dp_label]:
+                label.setTextFormat(Qt.RichText)
         else:
             self.reset_project_info()
-        
+
         self.update_total_profit()
 
     def reset_project_info(self):
@@ -2080,8 +2126,7 @@ class MaterialTable(TableWidget):
         for col in range(self.table.columnCount()):
             item = self.table.item(selected_row, col)
             if item is not None:
-                if col in [3, 4]:  # Harga Satuan and Total columns
-                    # Parse currency for editing
+                if col in [3, 4]:
                     value = self.parse_currency(item.text())
                     initial_data.append(str(value))
                 else:
@@ -2095,7 +2140,7 @@ class MaterialTable(TableWidget):
             if dialog.validate_data():
                 data = dialog.get_data()
                 for col, item_text in enumerate(data):
-                    if col in [3, 4]:  # Harga Satuan and Total columns
+                    if col in [3, 4]: 
                         formatted_price = self.format_currency(float(item_text))
                         self.table.setItem(selected_row, col, QTableWidgetItem(formatted_price))
                     else:
@@ -2212,10 +2257,139 @@ class MaterialTable(TableWidget):
         sheet.cell(row=sheet.max_row, column=2, value=self.format_currency(total_profit))
 
     def close_book(self):
-        pass
+        reply = QMessageBox.question(self, 'Tutup Buku', 'Anda yakin ingin menutup buku untuk semua proyek? Ini akan membuat backup data saat ini dan menghapus semua data dari tabel.',
+                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            current_date = datetime.now()
+            backup_name = f"materials_backup_{self.user_id}_{current_date.year}_{current_date.month}_{current_date.day}"
+        
+            # Backup semua proyek dan material usage
+            self.db.backup_projects_and_materials(self.user_id, backup_name)
+        
+            # Hapus semua data proyek dan material usage
+            self.db.clear_projects_and_materials(self.user_id)
+        
+            self.load_data()  # Reload the (now empty) table
+            self.reset_project_info()
+            QMessageBox.information(self, "Tutup Buku", f"Buku telah ditutup. Data lama telah dibackup ke {backup_name} dan tabel telah direset.")
 
     def view_history(self):
-        pass
+        backup_books = self.db.get_backup_books(self.user_id)
+        if backup_books:
+            formatted_names = [self.format_backup_name(book) for book in backup_books]
+        
+            formatted_name, ok = QInputDialog.getItem(
+                self, 
+                "Pilih Riwayat", 
+                "Riwayat Tutup Buku:", 
+                formatted_names,
+                0, 
+                False
+            )
+        
+            if ok:
+                original_name = backup_books[formatted_names.index(formatted_name)]
+                projects, materials = self.db.load_backup_book(original_name)
+                self.display_history(projects, materials, formatted_name, original_name)
+        else:
+            QMessageBox.information(self, "Tidak Ada Data", "Tidak ada riwayat tersimpan untuk tabel ini.")
+
+    def format_backup_name(self, backup_name):
+        parts = backup_name.split('_')
+        user_id, year, month, day = parts[-4], parts[-3], parts[-2], parts[-1]
+        return f"Tutup Buku {day}/{month}/{year} (User {user_id})"
+
+    def display_history(self, projects, materials, book_name, original_name):
+        self.is_viewing_history = True
+        self.current_book_name = original_name
+
+        original_title = "Daftar Pemakaian Bahan"
+        self.title_label.setText(f"{original_title} - Riwayat {book_name}")
+
+        self.table.setRowCount(0)
+        self.reset_project_info()
+
+        # Hide normal buttons
+        self.add_button.hide()
+        self.edit_button.hide()
+        self.delete_button.hide()
+        self.new_project_button.hide()
+        self.select_project_button.hide()
+        self.edit_project_button.hide()
+        self.delete_project_button.hide()
+        self.close_book_button.hide()
+
+        # Remove existing return and select history project buttons if they exist
+        if hasattr(self, 'return_button') and self.return_button:
+            self.return_button.setParent(None)
+            self.return_button.deleteLater()
+            self.return_button = None
+
+        if hasattr(self, 'select_history_project_button') and self.select_history_project_button:
+            self.select_history_project_button.setParent(None)
+            self.select_history_project_button.deleteLater()
+            self.select_history_project_button = None
+
+        # Create new return button
+        self.return_button = QPushButton("Kembali ke Data Saat Ini")
+        self.return_button.clicked.connect(self.return_to_current_data)
+        self.button_layout.addWidget(self.return_button)
+
+        # Create new select history project button
+        self.select_history_project_button = QPushButton("Pilih Proyek")
+        self.select_history_project_button.clicked.connect(lambda: self.select_history_project(projects, materials))
+        self.button_layout.addWidget(self.select_history_project_button)
+
+        if projects:
+            self.load_history_project(projects[0][0], projects, materials)
+
+
+    def select_history_project(self, projects, materials):
+        dialog = ProjectSelectionDialog(projects, self)
+        if dialog.exec_() == QDialog.Accepted:
+            selected_project_id = dialog.get_selected_project()
+            if selected_project_id is not None:
+                self.load_history_project(selected_project_id, projects, materials)
+
+    def load_history_project(self, project_id, projects, materials):
+        project = next((p for p in projects if p[0] == project_id), None)
+        if project:
+            self.update_project_info(project)
+            
+            self.table.setRowCount(0)
+            for material in materials:
+                if material[1] == project_id:  # Check if material belongs to current project
+                    self.add_row(material[2:8])  # Skip id and project_id
+
+            self.update_total_price()
+
+    def return_to_current_data(self):
+        self.is_viewing_history = False
+        self.current_book_name = None
+        self.title_label.setText("Daftar Pemakaian Bahan")
+
+        self.add_button.show()
+        self.edit_button.show()
+        self.delete_button.show()
+        self.new_project_button.show()
+        self.select_project_button.show()
+        self.edit_project_button.show()
+        self.delete_project_button.show()
+        self.close_book_button.show()
+
+        if hasattr(self, 'return_button'):
+            self.return_button.setParent(None)
+            self.return_button.deleteLater()
+            self.return_button = None
+
+        if hasattr(self, 'select_history_project_button'):
+            self.select_history_project_button.setParent(None)
+            self.select_history_project_button.deleteLater()
+            self.select_history_project_button = None
+
+        # Reset and reload current data
+        self.reset_project_info()
+        self.load_data()
 
 class DateInputDialog(QDialog):
     def __init__(self, parent=None, title="Select Date"):
@@ -2303,3 +2477,60 @@ class PhotoViewerDialog(QDialog):
             self.update_photo()
             QMessageBox.information(self, "Sukses", "Foto berhasil dihapus.")
             self.close()
+
+class ProjectSelectionDialog(QDialog):
+    def __init__(self, projects, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pilih Proyek")
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(400)
+
+        layout = QVBoxLayout(self)
+
+        # Search input
+        self.search_input = QLineEdit(self)
+        self.search_input.setPlaceholderText("Cari proyek...")
+        layout.addWidget(self.search_input)
+
+        # Project table
+        self.project_table = QTableWidget(self)
+        self.project_table.setColumnCount(3)
+        self.project_table.setHorizontalHeaderLabels(["Nama Proyek", "Tanggal Mulai", "Tanggal Selesai"])
+        self.project_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.project_table.verticalHeader().setVisible(False)
+        self.project_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.project_table.setSelectionMode(QTableWidget.SingleSelection)
+        layout.addWidget(self.project_table)
+
+        # OK and Cancel buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        # Populate the table
+        self.projects = projects
+        self.populate_table()
+
+        # Connect search input to filter function
+        self.search_input.textChanged.connect(self.filter_projects)
+
+    def populate_table(self, filter_text=""):
+        self.project_table.setRowCount(0)
+        for project in self.projects:
+            if filter_text.lower() in project[1].lower():
+                row = self.project_table.rowCount()
+                self.project_table.insertRow(row)
+                self.project_table.setItem(row, 0, QTableWidgetItem(project[1]))
+                self.project_table.setItem(row, 1, QTableWidgetItem(project[4]))
+                self.project_table.setItem(row, 2, QTableWidgetItem(project[5]))
+                self.project_table.item(row, 0).setData(Qt.UserRole, project[0])
+
+    def filter_projects(self, text):
+        self.populate_table(text)
+
+    def get_selected_project(self):
+        selected_items = self.project_table.selectedItems()
+        if selected_items:
+            return self.project_table.item(selected_items[0].row(), 0).data(Qt.UserRole)
+        return None

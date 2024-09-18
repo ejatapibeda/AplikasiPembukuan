@@ -669,6 +669,53 @@ class DatabaseManager:
         ''', (project_id, user_id))
         result = self.cursor.fetchone()
         return result[0] if result else None
+    
+    def backup_projects_and_materials(self, user_id, backup_name):
+        # Backup projects
+        self.cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {backup_name}_projects AS
+        SELECT * FROM projects WHERE user_id = ?
+        ''', (user_id,))
+
+        # Backup materials_usage
+        self.cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS {backup_name}_materials AS
+        SELECT * FROM materials_usage WHERE project_id IN (SELECT id FROM projects WHERE user_id = ?)
+        ''', (user_id,))
+
+        self.conn.commit()
+
+    def clear_projects_and_materials(self, user_id):
+        # Clear materials_usage for the user's projects
+        self.cursor.execute('''
+        DELETE FROM materials_usage 
+        WHERE project_id IN (SELECT id FROM projects WHERE user_id = ?)
+        ''', (user_id,))
+    
+        # Clear projects
+        self.cursor.execute("DELETE FROM projects WHERE user_id = ?", (user_id,))
+    
+        self.conn.commit()
+
+    def get_backup_books(self, user_id):
+        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'materials_backup_%_projects'")
+        backup_names = [row[0][:-9] for row in self.cursor.fetchall()]  # Remove '_projects' suffix
+    
+        # Remove duplicates and sort in reverse order (newest first)
+        unique_backups = sorted(set(backup_names), reverse=True)
+    
+        return unique_backups
+
+    def load_backup_book(self, backup_name):
+        # Load projects
+        self.cursor.execute(f"SELECT * FROM {backup_name}_projects")
+        projects = self.cursor.fetchall()
+
+        # Load materials
+        self.cursor.execute(f"SELECT * FROM {backup_name}_materials")
+        materials = self.cursor.fetchall()
+
+        return projects, materials
 
     def __del__(self):
         self.conn.close()
