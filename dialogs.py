@@ -1,17 +1,11 @@
 import webbrowser
-from PyQt5.QtWidgets import QDialog, QFileDialog, QVBoxLayout, QLabel, QTextEdit, QLineEdit, QPushButton, QFormLayout, QComboBox, QDateEdit, QProgressBar, QDialogButtonBox, QMessageBox
-from PyQt5.QtCore import QThread, pyqtSignal, QDate, QUrl
-from PyQt5.QtGui import QDesktopServices, QDoubleValidator
+from PyQt5.QtWidgets import QDialog, QFileDialog, QVBoxLayout, QLabel, QTextEdit, QLineEdit, QPushButton, QFormLayout, QComboBox, QDateEdit, QDialogButtonBox, QMessageBox
+from PyQt5.QtCore import QThread, pyqtSignal, QDate, Qt
+from PyQt5.QtGui import QGuiApplication, QDoubleValidator
 
-from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-import json
+import shutil
 import os
-from threading import Thread
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import urllib.parse
+from datetime import datetime
 from error_handling import setup_error_handling
 
 
@@ -206,56 +200,6 @@ class ProjectInputDialog(QDialog):
             return
         
         super().accept()
-        
-class AddTukangDialog(AddDialog):
-    def __init__(self, parent=None, initial_data=None):
-        super().__init__(parent)
-        setup_error_handling()
-        self.setWindowTitle("Tambah/Edit Proyek Tukang")
-        if initial_data:
-            self.load_data(initial_data)
-
-    def setup_ui(self):
-        self.name_input = QLineEdit()
-        self.address_input = QLineEdit()
-        self.job_input = QLineEdit()
-        self.size_input = QLineEdit()
-        self.kb_input = QLineEdit()
-        self.notes_input = QLineEdit()
-
-        self.form_layout.addRow("Nama Konsumen:", self.name_input)
-        self.form_layout.addRow("Alamat:", self.address_input)
-        self.form_layout.addRow("Pekerjaan:", self.job_input)
-        self.form_layout.addRow("Ukuran:", self.size_input)
-        self.form_layout.addRow("KB:", self.kb_input)
-        self.form_layout.addRow("Keterangan:", self.notes_input)
-
-        self.inputs = [
-            self.name_input,
-            self.address_input,
-            self.job_input,
-            self.size_input,
-            self.kb_input,
-            self.notes_input
-        ]
-
-    def load_data(self, data):
-        self.name_input.setText(data[0])
-        self.address_input.setText(data[1])
-        self.job_input.setText(data[2])
-        self.size_input.setText(data[3])
-        self.kb_input.setText(data[4])
-        self.notes_input.setText(data[5])
-
-    def get_data(self):
-        return [
-            self.name_input.text(),
-            self.address_input.text(),
-            self.job_input.text(),
-            self.size_input.text(),
-            self.kb_input.text(),
-            self.notes_input.text()
-        ]
 
 class AddMaterialDialog(QDialog):
     def __init__(self, parent=None, initial_data=None):
@@ -337,179 +281,6 @@ class AddMaterialDialog(QDialog):
         self.total_label.setText(data[4])
         self.notes_input.setPlainText(data[5])
         self.update_total()
-
-class RedirectHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        setup_error_handling()
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        self.wfile.write(b'Authentication successful! You can close this window.')
-        self.server.path = self.path
-
-class BackupWorker(QThread):
-    finished = pyqtSignal()
-    progress = pyqtSignal(int)
-    error = pyqtSignal(str)
-
-    def __init__(self, credentials):
-        super().__init__()
-        setup_error_handling()
-        self.credentials = credentials
-
-    def run(self):
-        try:
-            drive_service = build("drive", "v3", credentials=self.credentials)
-
-            file_metadata = {"name": "project_management_backup.db"}
-            media = MediaFileUpload("project_management.db", resumable=True)
-
-            file = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-
-            self.finished.emit()
-        except Exception as e:
-            self.error.emit(str(e))
-
-class AuthThread(QThread):
-    auth_completed = pyqtSignal(object)
-    auth_failed = pyqtSignal(str)
-
-    def __init__(self, flow):
-        super().__init__()
-        self.flow = flow
-        self.server = None
-        self.is_cancelled = False
-
-    def run(self):
-        try:
-            auth_url, _ = self.flow.authorization_url(prompt='consent')
-            QDesktopServices.openUrl(QUrl(auth_url))
-            
-            self.server = HTTPServer(('localhost', 8080), RedirectHandler)
-            self.server.timeout = 1  # Set a short timeout to allow frequent checks for cancellation
-            
-            while not self.is_cancelled:
-                self.server.handle_request()
-                if hasattr(self.server, 'path'):
-                    break
-            
-            if self.is_cancelled:
-                return
-            
-            authorization_response = urllib.parse.unquote(self.server.path)
-            self.flow.fetch_token(authorization_response=authorization_response)
-            
-            self.auth_completed.emit(self.flow.credentials)
-        except Exception as e:
-            if not self.is_cancelled:
-                self.auth_failed.emit(str(e))
-
-    def cancel(self):
-        self.is_cancelled = True
-        if self.server:
-            self.server.server_close()
-
-class BackupDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Backup ke Google Drive")
-        self.setGeometry(200, 200, 400, 200)
-
-        self.layout = QVBoxLayout(self)
-
-        self.status_label = QLabel("Klik tombol di bawah untuk memulai backup", self)
-        self.layout.addWidget(self.status_label)
-
-        self.progress_bar = QProgressBar(self)
-        self.progress_bar.setRange(0, 0)  # Indeterminate progress
-        self.progress_bar.hide()
-        self.layout.addWidget(self.progress_bar)
-
-        self.auth_button = QPushButton("Mulai Backup", self)
-        self.auth_button.clicked.connect(self.start_authentication)
-        self.layout.addWidget(self.auth_button)
-
-        self.flow = None
-        self.credentials = None
-        self.auth_thread = None
-        self.backup_worker = None
-
-    def start_authentication(self):
-        os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
-
-        with open('client_secret.json', 'r') as f:
-            client_config = json.load(f)
-
-        self.flow = Flow.from_client_config(
-            client_config,
-            scopes=['https://www.googleapis.com/auth/drive.file'],
-            redirect_uri='http://localhost:8080/'
-        )
-
-        self.auth_thread = AuthThread(self.flow)
-        self.auth_thread.auth_completed.connect(self.on_auth_completed)
-        self.auth_thread.auth_failed.connect(self.on_auth_failed)
-        self.auth_thread.start()
-
-        self.status_label.setText("Browser akan terbuka. Silakan otorisasi aplikasi.")
-        self.progress_bar.show()
-        self.auth_button.setEnabled(False)
-
-    def on_auth_completed(self, credentials):
-        self.credentials = credentials
-        self.save_credentials()
-        self.status_label.setText("Autentikasi berhasil. Memulai backup...")
-        self.start_backup()
-
-    def on_auth_failed(self, error_message):
-        self.progress_bar.hide()
-        self.status_label.setText(f"Gagal melakukan autentikasi: {error_message}")
-        self.auth_button.setEnabled(True)
-
-    def start_backup(self):
-        self.auth_button.setEnabled(False)
-        self.progress_bar.show()
-
-        self.backup_worker = BackupWorker(self.credentials)
-        self.backup_worker.finished.connect(self.on_backup_finished)
-        self.backup_worker.error.connect(self.on_backup_error)
-        self.backup_worker.start()
-
-    def on_backup_finished(self):
-        self.progress_bar.hide()
-        self.status_label.setText("Backup berhasil dilakukan.")
-        self.auth_button.hide()  # Hide the button after successful backup
-
-    def on_backup_error(self, error_message):
-        self.progress_bar.hide()
-        self.status_label.setText(f"Gagal melakukan backup: {error_message}")
-        self.auth_button.setEnabled(True)
-
-    def save_credentials(self):
-        with open('token.json', 'w') as token:
-            token.write(self.credentials.to_json())
-
-    def closeEvent(self, event):
-        if self.auth_thread and self.auth_thread.isRunning():
-            reply = QMessageBox.question(self, 'Konfirmasi',
-                                         "Proses autentikasi sedang berlangsung. Anda yakin ingin menutup?",
-                                         QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                self.auth_thread.cancel()
-                self.auth_thread.wait()  # Wait for the thread to finish
-                event.accept()
-            else:
-                event.ignore()
-        else:
-            event.accept()
-
-    def cleanup(self):
-        if self.auth_thread:
-            self.auth_thread.cancel()
-            self.auth_thread.wait()
-        if self.backup_worker:
-            self.backup_worker.quit()
-            self.backup_worker.wait()
 
 class AddSalesProjectDialog(QDialog):
     def __init__(self, parent=None):
@@ -660,3 +431,96 @@ class AddTukangProjectDialog(QDialog):
         self.size_edit.setText(str(data[3]))
         self.kb_edit.setText(str(data[4]))
         self.notes_edit.setPlainText(str(data[5]))
+
+class BackupWorker(QThread):
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+
+    def __init__(self, source_path, destination_path):
+        super().__init__()
+        self.source_path = source_path
+        self.destination_path = destination_path
+
+    def run(self):
+        try:
+            os.makedirs(os.path.dirname(self.destination_path), exist_ok=True)
+            shutil.copy2(self.source_path, self.destination_path)
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
+class BackupDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Backup Database")
+        self.setFixedSize(1, 1)  # Minimal size to make the dialog invisible
+        self.setWindowFlags(Qt.FramelessWindowHint)  # Remove window decorations
+
+        # Start the backup process immediately
+        self.confirm_backup()
+
+    def center_message_box(self, message_box):
+        message_box.show()
+        screen_geometry = QGuiApplication.primaryScreen().availableGeometry()
+        center_point = screen_geometry.center()
+        message_box_geometry = message_box.frameGeometry()
+        message_box_geometry.moveCenter(center_point)
+        message_box.move(message_box_geometry.topLeft())
+    
+    def confirm_backup(self):
+        current_date = datetime.now().strftime("%d %B %Y")
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Question)
+        msg_box.setWindowTitle('Konfirmasi Backup')
+        msg_box.setText(f"Apakah Anda yakin ingin melakukan backup pada tanggal {current_date}?")
+        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg_box.setDefaultButton(QMessageBox.No)
+        self.center_message_box(msg_box)
+        reply = msg_box.exec_()
+
+        if reply == QMessageBox.Yes:
+            self.start_backup()
+        else:
+            self.reject()  # Close the dialog if user selects No
+
+    def start_backup(self):
+        current_date = datetime.now().strftime("%d-%m-%Y")
+        backup_folder = os.path.join("backup", current_date)
+        
+        source_path = "project_management.db"
+        destination_path = os.path.join(backup_folder, "project_management.db")
+
+        # Check if a backup already exists for today
+        counter = 1
+        while os.path.exists(destination_path):
+            counter += 1
+            destination_path = os.path.join(backup_folder, f"project_management({counter}).db")
+
+        self.backup_worker = BackupWorker(source_path, destination_path)
+        self.backup_worker.finished.connect(self.on_backup_finished)
+        self.backup_worker.error.connect(self.on_backup_error)
+        self.backup_worker.start()
+
+    def on_backup_finished(self):
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setWindowTitle("Backup Berhasil")
+        msg_box.setText("Database berhasil di-backup ke folder lokal.")
+        self.center_message_box(msg_box)
+        msg_box.exec_()
+        self.accept()  # Close the dialog
+
+    def on_backup_error(self, error_message):
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Critical)
+        msg_box.setWindowTitle("Backup Gagal")
+        msg_box.setText(f"Gagal melakukan backup: {error_message}")
+        self.center_message_box(msg_box)
+        msg_box.exec_()
+        self.reject()  # Close the dialog
+
+    def closeEvent(self, event):
+        if hasattr(self, 'backup_worker') and self.backup_worker.isRunning():
+            self.backup_worker.quit()
+            self.backup_worker.wait()
+        event.accept()

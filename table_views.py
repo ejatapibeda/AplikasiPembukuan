@@ -1,14 +1,13 @@
 from PyQt5.QtWidgets import QWidget, QFrame , QComboBox, QDialogButtonBox, QVBoxLayout, QLabel, QTableWidget, QTextEdit, QTableWidgetItem, QHeaderView, QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QMessageBox, QInputDialog, QDateEdit, QSpacerItem, QDialog, QSizePolicy, QListWidgetItem, QListWidget
-from PyQt5.QtGui import QFont, QPixmap, QColor, QCursor
+from PyQt5.QtGui import QFont, QPixmap, QColor, QTransform
 from PyQt5.QtCore import Qt, QDate
 import openpyxl
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font, Alignment
 from datetime import datetime
 import os
-import subprocess
 
-from dialogs import AddConsumerDialog, ProjectInputDialog, AddTukangDialog, AddMaterialDialog, AddSalesProjectDialog, AddTukangProjectDialog
+from dialogs import AddConsumerDialog, ProjectInputDialog, AddMaterialDialog, AddSalesProjectDialog, AddTukangProjectDialog
 from database import DatabaseManager, COLUMN_MAPPINGS
 from error_handling import setup_error_handling
 
@@ -2020,9 +2019,14 @@ class MaterialTable(TableWidget):
         if not self.current_project_id:
             QMessageBox.warning(self, "No Project Selected", "Please select a project first.")
             return
+    
+        if self.is_viewing_history:
+            projects = self.db.load_closed_book(self.current_book_name + "_projects")
+            project = next((p for p in projects if p[0] == self.current_project_id), None)
+        else:
+            projects = self.db.get_projects(self.user_id)
+            project = next((p for p in projects if p[0] == self.current_project_id), None)
 
-        projects = self.db.get_projects(self.user_id)
-        project = next((p for p in projects if p[0] == self.current_project_id), None)
         if not project:
             QMessageBox.warning(self, "Error", "Proyek tidak ditemukan.")
             return
@@ -2040,15 +2044,21 @@ class MaterialTable(TableWidget):
         dialog = ProjectInputDialog(self, initial_data)
         if dialog.exec_() == QDialog.Accepted:
             updated_data = dialog.get_project_data()
-        
+
             if updated_data['Nama Proyek'].lower() != project[1].lower():
                 existing_project_names = [p[1].lower() for p in projects if p[0] != self.current_project_id]
                 if updated_data['Nama Proyek'].lower() in existing_project_names:
                     QMessageBox.warning(self, "Nama Proyek Sudah Ada", "Proyek dengan nama yang sama sudah ada. Silakan gunakan nama lain.")
                     return
-        
+
             updated_project_data = tuple(updated_data.values()) + (self.current_project_id,)
-            self.db.update_project(updated_project_data, self.user_id)
+
+            if self.is_viewing_history:
+                # When editing a project in history, ensure the correct table is updated
+                self.db.update_in_closed_book(self.current_book_name + "_projects", self.current_project_id, dict(zip(["name", "sales_name", "worker_name", "start_date", "end_date", "total_project", "dp"], updated_data.values())))
+            else:
+                self.db.update_project(updated_project_data, self.user_id)
+
             self.update_project_info()
             QMessageBox.information(self, "Success", "Project updated successfully.")
 
@@ -2080,13 +2090,16 @@ class MaterialTable(TableWidget):
 
     def update_project_info(self, project=None):
         if project is None and self.current_project_id:
-            projects = self.db.get_projects(self.user_id)
+            if self.is_viewing_history:
+                projects = self.db.load_closed_book(self.current_book_name + "_projects")
+            else:
+                projects = self.db.get_projects(self.user_id)
             project = next((p for p in projects if p[0] == self.current_project_id), None)
 
         if project:
             self.current_project_name = project[1]
             self.total_project = self.parse_currency(project[6])
-        
+    
             self.project_name_label.setText(f"Proyek: {self.current_project_name}")
             self.sales_label.setText(f"<b>Sales:</b> {project[2]}")
             self.worker_label.setText(f"<b>Tukang:</b> {project[3]}")
@@ -2121,9 +2134,9 @@ class MaterialTable(TableWidget):
 
         selected_row = selected_items[0].row()
         dialog = AddMaterialDialog(self)
-        
+    
         initial_data = []
-        for col in range(self.table.columnCount()):
+        for col in range(self.table.columnCount() - 1):  # Exclude the hidden ID column
             item = self.table.item(selected_row, col)
             if item is not None:
                 if col in [3, 4]:
@@ -2133,7 +2146,7 @@ class MaterialTable(TableWidget):
                     initial_data.append(item.text())
             else:
                 initial_data.append("")
-        
+    
         dialog.load_data(initial_data)
 
         if dialog.exec_():
@@ -2145,9 +2158,14 @@ class MaterialTable(TableWidget):
                         self.table.setItem(selected_row, col, QTableWidgetItem(formatted_price))
                     else:
                         self.table.setItem(selected_row, col, QTableWidgetItem(str(item_text) if item_text is not None else ""))
-                
-                material_id = self.db.get_material_usage(self.current_project_id, self.user_id)[selected_row][0]
-                self.db.update_material_usage(material_id, data, self.user_id)
+            
+                if self.is_viewing_history:
+                    record_id = int(self.table.item(selected_row, 6).text())  # Get the ID from the hidden column
+                    self.db.update_in_closed_book(self.current_book_name + "_materials", record_id, dict(zip(["date", "item_name", "quantity", "unit_price", "total", "notes"], data)))
+                else:
+                    material_id = self.db.get_material_usage(self.current_project_id, self.user_id)[selected_row][0]
+                    self.db.update_material_usage(material_id, data, self.user_id)
+            
                 self.update_total_price()
             else:
                 QMessageBox.warning(self, "Input Tidak Valid", "Quantity dan Harga Satuan harus berupa angka.")
@@ -2159,17 +2177,21 @@ class MaterialTable(TableWidget):
             return
 
         reply = QMessageBox.question(self, 'Konfirmasi Hapus', 'Anda yakin ingin menghapus data ini?',
-                                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
             selected_row = selected_items[0].row()
 
-            materials = self.db.get_material_usage(self.current_project_id, self.user_id)
-            if selected_row < len(materials):
-                record_id = materials[selected_row][0]
-                self.db.delete_record(self.table_name, record_id, self.user_id)
+            if self.is_viewing_history:
+                record_id = int(self.table.item(selected_row, 6).text())
+                self.db.delete_from_closed_book(self.current_book_name + "_materials", record_id)
             else:
-                QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan dihapus.")
-                return
+                materials = self.db.get_material_usage(self.current_project_id, self.user_id)
+                if selected_row < len(materials):
+                    record_id = materials[selected_row][0]
+                    self.db.delete_record(self.table_name, record_id, self.user_id)
+                else:
+                    QMessageBox.warning(self, "Error", "Tidak dapat menemukan data yang akan dihapus.")
+                    return
 
             self.table.removeRow(selected_row)
             self.update_total_price()
@@ -2197,20 +2219,35 @@ class MaterialTable(TableWidget):
         return AddMaterialDialog(self)
 
     def open_add_dialog(self):
-        if self.current_project_id:
+        if self.is_viewing_history:
             dialog = self.get_add_dialog()
             if dialog.exec_():
                 if dialog.validate_data():
                     data = dialog.get_data()
-                    self.db.insert_material_usage(self.current_project_id, data, self.user_id)
-                    self.add_row(data)
+                    photo_path = "materialtable"
+                    new_id = self.db.add_to_closed_book(self.current_book_name + "_materials", dict(zip(["date", "item_name", "quantity", "unit_price", "total", "notes"], data)), photo_path ,self.user_id, self.current_project_id)
+                    print(self.user_id, self.current_project_id, data)
+                    self.add_row(data + [new_id])
                     self.update_total_price()
                 else:
                     QMessageBox.warning(self, "Input Tidak Valid", "Quantity dan Harga Satuan harus berupa angka.")
         else:
-            QMessageBox.warning(self, "No Project Selected", "Please select or create a project first.")
+            # Existing code for adding to current data
+            if self.current_project_id:
+                dialog = self.get_add_dialog()
+                if dialog.exec_():
+                    if dialog.validate_data():
+                        data = dialog.get_data()
+                        self.db.insert_material_usage(self.current_project_id, data, self.user_id)
+                        self.add_row(data)
+                        self.update_total_price()
+                    else:
+                        QMessageBox.warning(self, "Input Tidak Valid", "Quantity dan Harga Satuan harus berupa angka.")
+            else:
+                QMessageBox.warning(self, "No Project Selected", "Please select or create a project first.")
 
     def add_row(self, data):
+        print("ini add")
         row_position = self.table.rowCount()
         self.table.insertRow(row_position)
         for column, item in enumerate(data):
@@ -2219,6 +2256,10 @@ class MaterialTable(TableWidget):
                 self.table.setItem(row_position, column, QTableWidgetItem(formatted_price))
             else:
                 self.table.setItem(row_position, column, QTableWidgetItem(str(item)))
+
+        if len(data) > 6:
+            self.table.setItem(row_position, 6, QTableWidgetItem(str(data[6])))
+            
         self.update_total_price()
     
     def format_price(self, price):
@@ -2229,7 +2270,13 @@ class MaterialTable(TableWidget):
             return price 
     
     def add_additional_info(self, sheet):
-        project = next((p for p in self.db.get_projects(self.user_id) if p[0] == self.current_project_id), None)
+        if self.is_viewing_history:
+            projects = self.db.load_closed_book(self.current_book_name + "_projects")
+        else:
+            projects = self.db.get_projects(self.user_id)
+    
+        project = next((p for p in projects if p[0] == self.current_project_id), None)
+    
         if project:
             project_details = [
                 ("Nama Proyek", project[1]),
@@ -2238,7 +2285,7 @@ class MaterialTable(TableWidget):
                 ("Tanggal Mulai", project[4]),
                 ("Tanggal Selesai", project[5]),
                 ("Total Proyek", self.format_currency(self.parse_currency(project[6]))),
-               ("DP", self.format_currency(self.parse_currency(project[7])))
+                ("DP", self.format_currency(self.parse_currency(project[7])))
             ]
             for label, value in project_details:
                 row = sheet.max_row + 1
@@ -2249,10 +2296,10 @@ class MaterialTable(TableWidget):
         total_profit = self.parse_currency(self.total_profit_label.text().split(": ")[1])
 
         sheet.append([""] * sheet.max_column)
-    
+
         sheet.cell(row=sheet.max_row + 1, column=1, value="Total Harga").font = Font(bold=True)
         sheet.cell(row=sheet.max_row, column=2, value=self.format_currency(total_price))
-    
+
         sheet.cell(row=sheet.max_row + 1, column=1, value="Total Keuntungan").font = Font(bold=True)
         sheet.cell(row=sheet.max_row, column=2, value=self.format_currency(total_profit))
 
@@ -2308,14 +2355,11 @@ class MaterialTable(TableWidget):
 
         self.table.setRowCount(0)
         self.reset_project_info()
+        self.edit_project_button.show()
 
         # Hide normal buttons
-        self.add_button.hide()
-        self.edit_button.hide()
-        self.delete_button.hide()
         self.new_project_button.hide()
         self.select_project_button.hide()
-        self.edit_project_button.hide()
         self.delete_project_button.hide()
         self.close_book_button.hide()
 
@@ -2354,14 +2398,18 @@ class MaterialTable(TableWidget):
     def load_history_project(self, project_id, projects, materials):
         project = next((p for p in projects if p[0] == project_id), None)
         if project:
+            self.current_project_id = project[0]  # Set the current_project_id
             self.update_project_info(project)
-            
+    
             self.table.setRowCount(0)
             for material in materials:
                 if material[1] == project_id:  # Check if material belongs to current project
-                    self.add_row(material[2:8])  # Skip id and project_id
+                    print(material[1] , project_id)
+                    self.add_row(list(material[2:8]) + [material[0]] )  # Convert tuple to list and include id, skip project_id
+                    print(list(material[2:8]) + [material[0]])
 
             self.update_total_price()
+
 
     def return_to_current_data(self):
         self.is_viewing_history = False
@@ -2414,18 +2462,27 @@ class PhotoViewerDialog(QDialog):
     def __init__(self, parent=None, photo_path=None, db_manager=None, project_id=None, user_id=None, is_sales_project=True):
         super().__init__(parent)
         self.setWindowTitle("Lihat Foto")
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(400)
         self.photo_path = photo_path
         self.db = DatabaseManager()
         self.project_id = project_id
         self.user_id = user_id
         self.is_sales_project = is_sales_project
+
+        # Rotation angle
+        self.rotation_angle = 0
+        
+        # Add minimize and maximize buttons
+        self.setWindowFlags(self.windowFlags() | Qt.WindowMinMaxButtonsHint)
+        
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
         self.photo_label = QLabel(self)
-        self.update_photo()
+        self.photo_label.setAlignment(Qt.AlignCenter)  # Center the image
         layout.addWidget(self.photo_label)
         
         button_layout = QHBoxLayout()
@@ -2434,27 +2491,46 @@ class PhotoViewerDialog(QDialog):
         close_button.clicked.connect(self.close)
         button_layout.addWidget(close_button)
         
-        open_file_button = QPushButton("Buka File", self)
-        open_file_button.clicked.connect(self.open_file)
-        button_layout.addWidget(open_file_button)
+        # open_file_button = QPushButton("Buka File", self)
+        # open_file_button.clicked.connect(self.open_file)
+        # button_layout.addWidget(open_file_button)
         
         delete_button = QPushButton("Hapus Foto", self)
         delete_button.clicked.connect(self.delete_photo)
         button_layout.addWidget(delete_button)
         
+        # Add rotate button
+        rotate_button = QPushButton("Putar Foto", self)
+        rotate_button.clicked.connect(self.rotate_photo)
+        button_layout.addWidget(rotate_button)
+        
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
+        self.update_photo()
 
     def update_photo(self):
         if self.photo_path and os.path.exists(self.photo_path):
             pixmap = QPixmap(self.photo_path)
             if not pixmap.isNull():
-                self.photo_label.setPixmap(pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                # Apply rotation if needed
+                if self.rotation_angle != 0:
+                    transform = QTransform().rotate(self.rotation_angle)
+                    pixmap = pixmap.transformed(transform, Qt.SmoothTransformation)
+
+                # Scale to fit within the photo_label, not the whole window
+                label_size = self.photo_label.size()
+                scaled_pixmap = pixmap.scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.photo_label.setPixmap(scaled_pixmap)
             else:
                 self.photo_label.setText("Error loading image")
         else:
             self.photo_label.setText("Image not found or invalid path")
+
+    def rotate_photo(self):
+        # Rotate by 90 degrees clockwise each time the button is clicked
+        self.rotation_angle = (self.rotation_angle + 90) % 360
+        self.update_photo()  # Update the photo with the new rotation
 
     def open_file(self):
         if os.path.exists(self.photo_path):
@@ -2477,6 +2553,11 @@ class PhotoViewerDialog(QDialog):
             self.update_photo()
             QMessageBox.information(self, "Sukses", "Foto berhasil dihapus.")
             self.close()
+
+    def resizeEvent(self, event):
+        # Automatically resize photo when window is resized
+        self.update_photo()  # Re-adjust the image size when the window size changes
+        super().resizeEvent(event)
 
 class ProjectSelectionDialog(QDialog):
     def __init__(self, projects, parent=None):

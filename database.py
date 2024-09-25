@@ -395,6 +395,12 @@ class DatabaseManager:
         new_id = self.get_next_id(backup_table_name)
         mapped_data['id'] = new_id
 
+        if photo_path == "materialtable":
+            if person_id is not None:
+                mapped_data['project_id'] = person_id
+            if user_id is not None:
+                mapped_data['user_id'] = user_id
+
         actual_columns = self.get_table_columns(backup_table_name)
         filtered_data = {k: v for k, v in mapped_data.items() if k in actual_columns}
 
@@ -404,7 +410,7 @@ class DatabaseManager:
 
         self.cursor.execute(query, tuple(filtered_data.values()))
 
-        if photo_path:
+        if photo_path and 'customer_name' in mapped_data:
             new_photo_path = self.save_project_photo(user_id, person_id, mapped_data['customer_name'], photo_path, is_tukang='worker' in table_name, is_history=True, backup_table_name=backup_table_name)
             self.cursor.execute(f'UPDATE "{backup_table_name}" SET photo_path = ? WHERE id = ?', (new_photo_path, new_id))
 
