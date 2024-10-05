@@ -416,20 +416,23 @@ class ConsumerTable(TableWidget):
         self.table.setColumnWidth(7, 200)  # Keterangan
         self.table.horizontalHeader().setStretchLastSection(True)
 
-
     def setup_table(self):
         self.table.setColumnCount(len(COLUMN_MAPPINGS[self.table_name]))
         self.table.setHorizontalHeaderLabels(list(COLUMN_MAPPINGS[self.table_name].keys()))
         self.set_column_widths()  # Tambahkan baris ini
 
     def load_data(self):
+        print("Memanggil fungsi load_data")  # Tambahkan log ini
         self.table.setRowCount(0)  # Clear existing data
         if self.user_id:
-            current_date = datetime.now()
             if self.is_viewing_history:
                 data = self.db.load_closed_book(self.current_book_name)
             else:
-                data = self.db.get_consumers(year=current_date.year, month=current_date.month, user_id=self.user_id)
+                data = self.db.get_consumers(year=None, month=None, user_id=self.user_id)
+            if not data:
+                print("Data yang diterima dari database kosong")  # Tambahkan log ini
+            else:
+                print(f"Data yang diterima dari database")  # Tambahkan log ini
             for row_data in data:
                 formatted_data = list(row_data[1:])  # Exclude id
                 formatted_data[5] = self.format_currency(formatted_data[5])  # Format total proyek
