@@ -2307,6 +2307,12 @@ class MaterialTable(TableWidget):
         sheet.cell(row=sheet.max_row, column=2, value=self.format_currency(total_profit))
 
     def close_book(self):
+        # Cek apakah ada proyek di dalam database
+        project_count = self.db.count_projects(self.user_id)
+        if project_count == 0 or project_count is None:
+            QMessageBox.warning(self, 'Tutup Buku', 'Tidak dapat menutup buku karena tidak ada proyek di dalam database.')
+            return
+
         reply = QMessageBox.question(self, 'Tutup Buku', 'Anda yakin ingin menutup buku untuk semua proyek? Ini akan membuat backup data saat ini dan menghapus semua data dari tabel.',
                                  QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
@@ -2314,14 +2320,14 @@ class MaterialTable(TableWidget):
             backup_name = f"materials_backup_{self.user_id}_{current_date.year}_{current_date.month}_{current_date.day}"
         
             # Backup semua proyek dan material usage
-            self.db.backup_projects_and_materials(self.user_id, backup_name)
+            unique_backup_name = self.db.backup_projects_and_materials(self.user_id, backup_name)
         
             # Hapus semua data proyek dan material usage
             self.db.clear_projects_and_materials(self.user_id)
         
             self.load_data()  # Reload the (now empty) table
             self.reset_project_info()
-            QMessageBox.information(self, "Tutup Buku", f"Buku telah ditutup. Data lama telah dibackup ke {backup_name} dan tabel telah direset.")
+            QMessageBox.information(self, "Tutup Buku", f"Buku telah ditutup. Data lama telah dibackup ke {unique_backup_name} dan tabel telah direset.")
 
     def view_history(self):
         backup_books = self.db.get_backup_books(self.user_id)
@@ -2346,8 +2352,15 @@ class MaterialTable(TableWidget):
 
     def format_backup_name(self, backup_name):
         parts = backup_name.split('_')
-        user_id, year, month, day = parts[-4], parts[-3], parts[-2], parts[-1]
-        return f"Tutup Buku {day}/{month}/{year} (User {user_id})"
+        if len(parts) < 7:
+            user_id, year, month, day = parts[2], parts[3], parts[4], parts[5]
+            return f"Tutup Buku {day}/{month}/{year} (User {user_id})"  # Return the original name if it doesn't match the expected format
+
+        user_id = parts[2]  # The user_id is now the third part
+        year, month, day = parts[3], parts[4], parts[5]
+        counter = parts[6]
+
+        return f"Tutup Buku {day}/{month}/{year} (User {user_id}, Backup #{counter})"
 
     def display_history(self, projects, materials, book_name, original_name):
         self.is_viewing_history = True

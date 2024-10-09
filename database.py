@@ -677,19 +677,33 @@ class DatabaseManager:
         return result[0] if result else None
     
     def backup_projects_and_materials(self, user_id, backup_name):
+        current_date = datetime.now().strftime("%Y_%m_%d")
+        base_name = f"materials_backup_{user_id}_{current_date}"
+        
+        count = 1
+        while True:
+            unique_backup_name = f"{base_name}_{count}"
+            
+            # Check if a table with this name already exists
+            self.cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{unique_backup_name}_projects'")
+            if not self.cursor.fetchone():
+                break
+            count += 1
+
         # Backup projects
         self.cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS {backup_name}_projects AS
+        CREATE TABLE IF NOT EXISTS {unique_backup_name}_projects AS
         SELECT * FROM projects WHERE user_id = ?
         ''', (user_id,))
 
         # Backup materials_usage
         self.cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS {backup_name}_materials AS
+        CREATE TABLE IF NOT EXISTS {unique_backup_name}_materials AS
         SELECT * FROM materials_usage WHERE project_id IN (SELECT id FROM projects WHERE user_id = ?)
         ''', (user_id,))
 
         self.conn.commit()
+        return unique_backup_name
 
     def clear_projects_and_materials(self, user_id):
         # Clear materials_usage for the user's projects
@@ -704,13 +718,16 @@ class DatabaseManager:
         self.conn.commit()
 
     def get_backup_books(self, user_id):
-        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'materials_backup_%_projects'")
-        backup_names = [row[0][:-9] for row in self.cursor.fetchall()]  # Remove '_projects' suffix
+        self.cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'materials_backup_{user_id}_%_projects'")
     
-        # Remove duplicates and sort in reverse order (newest first)
+        backup_names = [row[0][:-9] for row in self.cursor.fetchall()]  # Menghapus '_projects' suffix
         unique_backups = sorted(set(backup_names), reverse=True)
-    
+
         return unique_backups
+    
+    def count_projects(self, user_id):
+        self.cursor.execute("SELECT COUNT(*) FROM projects WHERE user_id = ?", (user_id,))
+        return self.cursor.fetchone()[0]
 
     def load_backup_book(self, backup_name):
         # Load projects
