@@ -6,7 +6,7 @@ import requests
 import os
 from PyQt5.QtWidgets import QMessageBox
 
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1277660263931318322/jvc5PSJ763Zyohkd5PBQrfyhKouzCnMRsllBL-WUqE6AvVV-2dk7aDoGS7QDvi7qZ8zV"
+DISCORD_WEBHOOK_URL = "hidden"
 
 def setup_error_handling():
     logging.basicConfig(filename='log.txt', level=logging.ERROR,
